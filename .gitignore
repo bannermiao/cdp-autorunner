@@ -1,0 +1,12 @@
+# 编译产物
+*.exe
+cdp-server-darwin-*
+cdp-server-linux-*
+*.gz
+
+# npm
+node_modules/
+
+# 系统
+.DS_Store
+Thumbs.db

@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-13, windows-latest]
+        include:
+          - os: ubuntu-latest
+            goarch: amd64
+            goos: linux
+            out: cdp-server-linux-amd64
+          - os: macos-latest
+            goarch: arm64
+            goos: darwin
+            out: cdp-server-darwin-arm64
+          - os: macos-13
+            goarch: amd64
+            goos: darwin
+            out: cdp-server-darwin-amd64
+          - os: windows-latest
+            goarch: amd64
+            goos: windows
+            out: cdp-server-win-x64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - run: cd cdp-server && CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o ${{ matrix.out }} .
+
+      - if: matrix.goos != 'windows'
+        run: gzip -k cdp-server/${{ matrix.out }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.out }}
+          path: cdp-server/${{ matrix.out }}*

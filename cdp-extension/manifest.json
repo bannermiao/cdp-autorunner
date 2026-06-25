@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "CDP Bridge",
+  "version": "2.0.0",
+  "description": "通过 WebSocket 连接真实浏览器，执行 CDP 命令",
+  "permissions": [
+    "debugger",
+    "tabs",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "CDP Bridge",
+    "default_icon": {
+      "128": "icon.png"
+    }
+  },
+  "icons": {
+    "128": "icon.png"
+  }
+}

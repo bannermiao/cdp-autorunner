@@ -1,0 +1,22 @@
+{
+  "name": "cdp-server",
+  "version": "1.0.0",
+  "description": "通过 Chrome 扩展控制真实浏览器的自动化 CLI 工具",
+  "bin": {
+    "cdp-server": "bin/cdp-server.js"
+  },
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  },
+  "files": [
+    "bin/",
+    "postinstall.js",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bannermiao/cdp-autorunner.git"
+  },
+  "keywords": ["cdp", "chrome-devtools-protocol", "browser-automation", "web-scraping"],
+  "license": "MIT"
+}

@@ -1,0 +1,8 @@
+# 源码目录（npm 包不包含）
+cdp-server/
+cdp-autorunner-skill/
+cdp-extension/
+test/
+
+# CI 配置
+.github/
