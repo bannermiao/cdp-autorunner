@@ -3,6 +3,7 @@
 cdp-server-darwin-*
 cdp-server-linux-*
 *.gz
+*.zip
 
 # npm
 node_modules/
@@ -10,3 +11,4 @@ node_modules/
 # 系统
 .DS_Store
 Thumbs.db
+.codebuddy

@@ -46,7 +46,7 @@ cdp-server browser goto/eval/click... ──WS──→ CDP Bridge 扩展 ──
 ├── references/
 │   └── cdp-server-cli.md             ← cdp-server 命令参考文档
 └── scripts/
-    ├── cdp-server (或 cdp-server.exe) ← Go 单二进制，零依赖
+    ├── cdp-server (或 cdp-server.exe) ← Go 单二进制（需下载，见 I-0）
     ├── ebay/                         ← eBay 调研脚本
     │   └── ebay-research.js          ← 搜索提取 + 可视化报表
     ├── google/                       ← Google 搜索脚本
@@ -68,6 +68,52 @@ cdp-server browser goto/eval/click... ──WS──→ CDP Bridge 扩展 ──
 ### 初始化清单
 
 逐项完成，每项完成后标记 ✅。
+
+#### [ ] I-0 下载 cdp-server 二进制（缺少时执行）
+
+如果 `{skill_path}/scripts/cdp-server` 或 `{skill_path}/scripts/cdp-server.exe` 不存在，从 GitHub Releases 下载：
+
+```bash
+cd {skill_path}/scripts
+
+# 判断平台
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+  FILE="cdp-server-win-x64.exe"
+  BIN="cdp-server.exe"
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+  ARCH=$(uname -m)
+  FILE=$([ "$ARCH" = "arm64" ] && echo "cdp-server-darwin-arm64.gz" || echo "cdp-server-darwin-amd64.gz")
+  BIN="cdp-server"
+else
+  FILE="cdp-server-linux-amd64.gz"
+  BIN="cdp-server"
+fi
+
+# 下载
+VERSION="v1.0.0"
+curl -L -o "$BIN.gz" "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/$FILE"
+
+# 解压（zip 格式的 .exe 不需要解压）
+if [[ "$FILE" == *.gz ]]; then
+  gzip -d "$BIN.gz"
+  chmod +x "$BIN"
+fi
+
+echo "下载完成: $BIN"
+```
+
+PowerShell（Windows）下：
+```powershell
+cd {skill_path}/scripts
+$VERSION = "v1.0.0"
+Invoke-WebRequest -Uri "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/cdp-server-win-x64.exe" -OutFile "cdp-server.exe"
+Write-Host "下载完成"
+```
+
+✅ 验证：`ls -la "{skill_path}/scripts/cdp-server"` 能找到二进制。
+❌ 失败 → 检查网络或手动从 [Releases](https://github.com/bannermiao/cdp-autorunner/releases) 下载。
+
+---
 
 #### [ ] I-1 启动 daemon
 
