@@ -89,7 +89,7 @@ cdp-server version
 
 ✅ 输出示例：
 ```
-cdp-server v1.0.0
+cdp-server v1.1.0
 ```
 
 ---
@@ -411,6 +411,99 @@ cdp-server browser close-tab
 ✅ 输出：
 ```
 CLOSE-TAB: ok
+```
+
+---
+
+### iframe 操作（`frame` 子命令）
+
+在 iframe 中执行操作。自动判断同域/跨域（OOPIF）iframe，对用户透明。
+
+**内部流程（跨域）：**
+1. 父页面获取 iframe src，滚动触发加载
+2. `chrome.debugger.getTargets()` 找到 OOPIF 目标
+3. `chrome.debugger.attach({targetId})` 附着到 OOPIF
+4. 发送 CDP 命令直接操作 iframe 内 DOM
+
+同域 iframe 不走 OOPIF，直接用 `contentDocument` 访问，性能更优。
+
+#### `frame <iframe选择器> eval <代码>`
+
+在 iframe 中执行任意 JS 表达式。
+
+```
+cdp-server browser frame "#desc_ifr" eval "document.title"
+cdp-server browser frame "#myframe" eval "document.querySelector('h1')?.textContent"
+```
+
+✅ 输出：JS 表达式的结果值。
+
+#### `frame <iframe选择器> text <选择器>`
+
+获取 iframe 内匹配元素的 textContent。
+
+```
+cdp-server browser frame "#desc_ifr" text "#policybox"
+cdp-server browser frame "#myframe" text "h1"
+```
+
+#### `frame <iframe选择器> html <选择器>`
+
+获取 iframe 内匹配元素的 outerHTML。
+
+```
+cdp-server browser frame "#desc_ifr" html "title"
+```
+
+#### `frame <iframe选择器> click <选择器>`
+
+点击 iframe 内匹配的元素。元素不存在时明确报错。
+
+```
+cdp-server browser frame "#desc_ifr" click "label[for='tab4']"
+```
+
+✅ 输出：
+```
+CLICK: label[for='tab4']
+```
+
+❌ 元素不存在时：
+```
+ERROR: 元素未找到: #nonexistent
+```
+
+#### `frame <iframe选择器> fill <选择器> <文本>`
+
+在 iframe 内的输入框中填入文本。
+
+```
+cdp-server browser frame "#desc_ifr" fill "#search" "keyword"
+```
+
+✅ 输出：
+```
+FILL: #search = keyword
+```
+
+#### `frame <iframe选择器> css <选择器> [@属性|html]`
+
+批量提取 iframe 内所有匹配元素的数据。默认取文本，支持 @属性 和 html 模式。返回 JSON 数组。
+
+```
+# 取所有 h1 文本
+cdp-server browser frame "#desc_ifr" css "h1"
+
+# 取所有图片 src
+cdp-server browser frame "#desc_ifr" css "img" @src
+
+# 取所有项 HTML
+cdp-server browser frame "#desc_ifr" css ".item" html
+```
+
+✅ 输出格式：
+```json
+["值1", "值2", "值3"]
 ```
 
 ---

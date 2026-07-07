@@ -90,7 +90,7 @@ else
 fi
 
 # 下载
-VERSION="v1.0.0"
+VERSION="v1.1.0"
 curl -L -o "$BIN.gz" "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/$FILE"
 
 # 解压（zip 格式的 .exe 不需要解压）
@@ -105,7 +105,7 @@ echo "下载完成: $BIN"
 PowerShell（Windows）下：
 ```powershell
 cd {skill_path}/scripts
-$VERSION = "v1.0.0"
+$VERSION = "v1.1.0"
 Invoke-WebRequest -Uri "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/cdp-server-win-x64.exe" -OutFile "cdp-server.exe"
 Write-Host "下载完成"
 ```
@@ -200,6 +200,18 @@ cd {cwd}
 | `fill <选择器> <文本>` | 输入文本 | `fill "#search" "手机"` |
 | `hover <选择器>` | 悬停 | `hover ".menu"` |
 | `select <选择器> <值>` | 选择下拉框 | `select "#sort" "price"` |
+
+#### iframe 操作
+| 命令 | 说明 | 示例 |
+|:-----|:-----|:------|
+| `frame <iframe选择器> eval <代码>` | 在 iframe 中执行 JS | `frame "#desc_ifr" eval "document.title"` |
+| `frame <iframe选择器> text <选择器>` | 取 iframe 内元素文本 | `frame "#desc_ifr" text "#policybox"` |
+| `frame <iframe选择器> html <选择器>` | 取 iframe 内元素 HTML | `frame "#desc_ifr" html "title"` |
+| `frame <iframe选择器> click <选择器>` | 点击 iframe 内元素 | `frame "#desc_ifr" click "label[for='tab4']"` |
+| `frame <iframe选择器> fill <选择器> <文本>` | 在 iframe 内输入文本 | `frame "#desc_ifr" fill "#search" "keyword"` |
+| `frame <iframe选择器> css <选择器>` | 批量提取 iframe 内元素 | `frame "#desc_ifr" css "h1"` |
+
+> `frame` 命令同时支持同域和跨域（OOPIF）iframe。同域通过 `contentDocument` 直接访问，跨域通过 Chrome 扩展的 `chrome.debugger.attach({targetId})` 附着到独立的 OOPIF CDP 目标。对用户完全透明。
 
 #### 等待策略
 | 命令 | 说明 | 示例 |

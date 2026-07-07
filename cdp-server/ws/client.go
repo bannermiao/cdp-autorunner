@@ -109,6 +109,22 @@ func SendEval(code string, timeout time.Duration) (interface{}, error) {
 	}, timeout)
 }
 
+// SendExt 在扩展上下文中执行命令（可调用 chrome.debugger 等扩展 API）
+// action: 命令名, params: 参数字典
+func SendExt(action string, params map[string]interface{}, timeout time.Duration) (interface{}, error) {
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	payload := map[string]interface{}{
+		"cmd":    "ext",
+		"action": action,
+	}
+	for k, v := range params {
+		payload[k] = v
+	}
+	return send(payload, timeout)
+}
+
 // SendCDP 发送 CDP 协议命令
 func SendCDP(method string, params map[string]interface{}, timeout ...time.Duration) (interface{}, error) {
 	t := defaultTimeout

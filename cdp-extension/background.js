@@ -112,11 +112,54 @@ async function handleMessage(data) {
     if (c.cmd === 'cdp') return cdpCmd(c.method, c.params, c.tabId, c.url);
     if (c.cmd === 'tabs') return handleTabs();
     if (c.cmd === 'batch') return handleBatch(c, c.tabId);
+    if (c.cmd === 'ext') return handleExt(c);
     if (c.method) return cdpCmd(c.method, c.params, c.tabId);
     return { ok: false, error: 'unknown cmd: ' + c.cmd };
   }
   if (typeof c === 'string') return handleExec(c, data.tabId);
   return { ok: false, error: 'invalid format' };
+}
+
+// ---- 扩展上下文命令（可调用 chrome.debugger / chrome.tabs 等扩展 API）----
+
+async function handleExt(c) {
+  const action = c.action;
+
+  // 获取所有 debugger targets（含 OOPIF）
+  if (action === 'getTargets') {
+    try { return { ok: true, data: await chrome.debugger.getTargets() }; }
+    catch (e) { return { ok: false, error: e.message }; }
+  }
+
+  // 在指定 targetId 上执行 JS（attach → evaluate → detach）
+  if (action === 'evalOnTarget') {
+    const targetId = c.targetId;
+    const expression = c.expression;
+    try {
+      await chrome.debugger.attach({ targetId }, '1.3');
+      const r = await chrome.debugger.sendCommand({ targetId }, 'Runtime.evaluate', {
+        expression, returnByValue: true, awaitPromise: true
+      });
+      await chrome.debugger.detach({ targetId });
+      if (r.exceptionDetails) return { ok: false, error: r.exceptionDetails.exception?.description || 'evaluate error' };
+      return { ok: true, data: r.result.value };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
+
+  // 在指定 targetId 上执行 CDP 命令
+  if (action === 'cdpOnTarget') {
+    const targetId = c.targetId;
+    const method = c.method;
+    const params = c.params || {};
+    try {
+      await chrome.debugger.attach({ targetId }, '1.3');
+      const r = await chrome.debugger.sendCommand({ targetId }, method, params);
+      await chrome.debugger.detach({ targetId });
+      return { ok: true, data: r };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
+
+  return { ok: false, error: 'unknown ext action: ' + action };
 }
 
 function wsSend(data) {

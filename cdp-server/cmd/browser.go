@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -416,6 +417,266 @@ func registerAllBrowserCommands() {
 			return "RESPONSE: " + fmt.Sprint(result), nil
 		},
 	})
+
+	// ---- frame 子命令 ----
+	registerFrameCommands()
+}
+
+func registerFrameCommands() {
+	// 内存缓存：在同一个 cdp-server 进程生命周期内缓存 targetId
+	// 不同 frame 命令之间共享（因为 OOPIF targetId 在页面不变时不变化）
+	var cachedTargetId struct {
+		src  string
+		id   string
+	}
+
+	// 从 URL 中提取 host+path 用于匹配（忽略 query/hash 差异）
+	urlHostPath := func(rawURL string) string {
+		u, err := url.Parse(rawURL)
+		if err != nil || u.Host == "" {
+			return rawURL
+		}
+		return u.Host + u.Path
+	}
+
+	// 内部辅助：获取 iframe 的 src → 滚动触发加载 → 找到 OOPIF targetId
+	resolveTargetId := func(iframeSel string) (string, error) {
+		// 1. 获取 iframe src
+		srcCode := fmt.Sprintf("document.querySelector('%s')?.src||''", escapeJSStr(iframeSel))
+		srcRaw, err := ws.SendEval(srcCode, 10*time.Second)
+		if err != nil {
+			return "", fmt.Errorf("获取 iframe src 失败: %w", err)
+		}
+		iframeSrc := fmt.Sprint(srcRaw)
+		if iframeSrc == "" {
+			return "", fmt.Errorf("未找到 iframe（选择器: %s）", iframeSel)
+		}
+
+		// 检查缓存
+		if cachedTargetId.src == iframeSrc && cachedTargetId.id != "" {
+			return cachedTargetId.id, nil
+		}
+
+		// 2. 先尝试同域路径：父页面直接访问 contentDocument
+		// 同域 iframe 没有 OOPIF，但父页可直接操作其 DOM
+		checkCode := fmt.Sprintf(`(function(){try{var d=document.querySelector('%s').contentDocument;return d?'SAME_ORIGIN':'NO_DOC'}catch(e){return 'CROSS_ORIGIN'}})()`, escapeJSStr(iframeSel))
+		originCheck, _ := ws.SendEval(checkCode, 5*time.Second)
+		if fmt.Sprint(originCheck) == "SAME_ORIGIN" {
+			// 同域：用 "SAME_ORIGIN:" + iframeSel 作为标记
+			return "SAME_ORIGIN:" + iframeSel, nil
+		}
+
+		// 3. 跨域路径：滚动触发 + 轮询 OOPIF target
+		loadCode := fmt.Sprintf(`(function(){var f=document.querySelector('%s');if(!f)return;f.scrollIntoView({block:'center'});f.removeAttribute('loading');})()`, escapeJSStr(iframeSel))
+		ws.SendEval(loadCode, 5*time.Second)
+
+		// 提取 host+path 用于匹配
+		targetHostPath := urlHostPath(iframeSrc)
+
+		// 3. 轮询 OOPIF target（最多等 15 秒）
+		for i := 0; i < 30; i++ {
+			time.Sleep(500 * time.Millisecond)
+			targetsRaw, err := ws.SendExt("getTargets", nil, 10*time.Second)
+			if err != nil {
+				continue
+			}
+			targetsList, ok := targetsRaw.([]interface{})
+			if !ok {
+				continue
+			}
+			for _, t := range targetsList {
+				tmap, ok := t.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				urlRaw, _ := tmap["url"].(string)
+				if urlRaw == "" {
+					continue
+				}
+				// 用 host+path 匹配（忽略 query string 差异）
+				if urlHostPath(urlRaw) == targetHostPath ||
+					strings.Contains(urlHostPath(urlRaw), urlHostPath(iframeSrc)) {
+					if tid, ok := tmap["id"].(string); ok && tid != "" {
+						cachedTargetId.src = iframeSrc
+						cachedTargetId.id = tid
+						return tid, nil
+					}
+				}
+			}
+		}
+		return "", fmt.Errorf("OOPIF target 未找到（iframe: %s）", iframeSrc)
+	}
+
+	// 构造 frame 子命令
+	frameCmd := &cobra.Command{
+		Use:   "frame <iframe选择器> <子命令> [args...]",
+		Short: "在 iframe 中执行操作（支持跨域 OOPIF）",
+		Long: `子命令:
+  eval <code>             执行 JS 表达式
+  text <选择器>            获取元素文本
+  html <选择器>            获取元素 HTML
+  click <选择器>           点击元素
+  fill <选择器> <文本>     输入文本
+  css <选择器> [@属性|html] 批量获取元素`,
+		Run: func(cmd *cobra.Command, args []string) {
+			if len(args) < 2 {
+				cmd.Help()
+				return
+			}
+			iframeSel := args[0]
+			subCmd := args[1]
+			subArgs := args[2:]
+
+			targetId, err := resolveTargetId(iframeSel)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR:", err)
+				os.Exit(1)
+			}
+
+			// 判断是同域还是跨域
+			isSameOrigin := strings.HasPrefix(targetId, "SAME_ORIGIN:")
+			var iframeDocPrefix string
+			if isSameOrigin {
+				// 同域：用 contentDocument 访问
+				iframeDocPrefix = fmt.Sprintf("document.querySelector('%s').contentDocument.", escapeJSStr(iframeSel))
+			}
+
+			// 执行 frame 内 JS，统一封装
+			// 同域用 SendEval（父页面上下文），跨域用 SendExt（OOPIF 上下文）
+			frameEval := func(expression string, timeout time.Duration) (interface{}, error) {
+				if isSameOrigin {
+					// 替换 expression 中的 "document." 为 contentDocument 前缀
+					// 例如: document.querySelector('.a') → contentDocument.querySelector('.a')
+					wrapped := strings.Replace(expression, "document.", iframeDocPrefix, 1)
+					return ws.SendEval(wrapped, timeout)
+				}
+				return ws.SendExt("evalOnTarget", map[string]interface{}{
+					"targetId":   targetId,
+					"expression": expression,
+				}, timeout)
+			}
+
+			// 根据子命令分发
+			var result interface{}
+			switch subCmd {
+			case "eval":
+				if len(subArgs) < 1 {
+					fmt.Fprintln(os.Stderr, "ERROR: frame eval 需要 JS 代码参数")
+					os.Exit(1)
+				}
+				result, err = frameEval(subArgs[0], 30*time.Second)
+
+			case "text":
+				if len(subArgs) < 1 {
+					fmt.Fprintln(os.Stderr, "ERROR: frame text 需要选择器参数")
+					os.Exit(1)
+				}
+				sel := escapeJSStr(subArgs[0])
+				if isSameOrigin {
+					result, err = frameEval(fmt.Sprintf("document.querySelector('%s')?.textContent?.trim()||''", sel), 15*time.Second)
+				} else {
+					result, err = frameEval(fmt.Sprintf("document.querySelector('%s')?.textContent?.trim()||''", sel), 15*time.Second)
+				}
+
+			case "html":
+				if len(subArgs) < 1 {
+					fmt.Fprintln(os.Stderr, "ERROR: frame html 需要选择器参数")
+					os.Exit(1)
+				}
+				sel := escapeJSStr(subArgs[0])
+				result, err = frameEval(fmt.Sprintf("document.querySelector('%s')?.outerHTML||''", sel), 15*time.Second)
+
+			case "click":
+				if len(subArgs) < 1 {
+					fmt.Fprintln(os.Stderr, "ERROR: frame click 需要选择器参数")
+					os.Exit(1)
+				}
+				sel := escapeJSStr(subArgs[0])
+				expression := fmt.Sprintf("(function(){var e=document.querySelector('%s');if(!e)return 'NOT_FOUND';e.click();return 'OK'})()", sel)
+				clickResult, clickErr := frameEval(expression, 15*time.Second)
+				err = clickErr
+				if err == nil && fmt.Sprint(clickResult) == "NOT_FOUND" {
+					err = fmt.Errorf("元素未找到: %s", subArgs[0])
+				} else {
+					result = "CLICK: " + subArgs[0]
+				}
+
+			case "fill":
+				if len(subArgs) < 2 {
+					fmt.Fprintln(os.Stderr, "ERROR: frame fill 需要选择器和文本参数")
+					os.Exit(1)
+				}
+				sel := escapeJSStr(subArgs[0])
+				text := subArgs[1]
+				if isSameOrigin {
+					// 同域 fill：直接用 exec 操作
+					frameEval(fmt.Sprintf(`(function(){var e=document.querySelector('%s');if(!e)return;e.focus();e.value='%s';e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));})()`, sel, escapeJSStr(text)), 15*time.Second)
+				} else {
+					// 跨域 fill：focus + CDP insertText
+					frameEval(fmt.Sprintf(`(function(){var e=document.querySelector('%s');if(!e)return;e.focus();e.select();})()`, sel), 10*time.Second)
+					_, err = ws.SendExt("cdpOnTarget", map[string]interface{}{
+						"targetId": targetId,
+						"method":   "Input.insertText",
+						"params":   map[string]interface{}{"text": text},
+					}, 15*time.Second)
+				}
+				result = "FILL: " + subArgs[0] + " = " + subArgs[1]
+
+			case "css":
+				if len(subArgs) < 1 {
+					fmt.Fprintln(os.Stderr, "ERROR: frame css 需要选择器参数")
+					os.Exit(1)
+				}
+				sel := escapeJSStr(subArgs[0])
+				var expression string
+				if len(subArgs) == 2 {
+					if strings.HasPrefix(subArgs[1], "@") {
+						attr := escapeJSStr(subArgs[1][1:])
+						expression = fmt.Sprintf("JSON.stringify(Array.from(document.querySelectorAll('%s'),e=>e.getAttribute('%s')||''))", sel, attr)
+					} else if subArgs[1] == "html" {
+						expression = fmt.Sprintf("JSON.stringify(Array.from(document.querySelectorAll('%s'),e=>e.outerHTML))", sel)
+					} else {
+						expression = fmt.Sprintf("JSON.stringify(Array.from(document.querySelectorAll('%s'),e=>e.textContent?.trim()||''))", sel)
+					}
+				} else {
+					expression = fmt.Sprintf("JSON.stringify(Array.from(document.querySelectorAll('%s'),e=>e.textContent?.trim()||''))", sel)
+				}
+				result, err = frameEval(expression, 15*time.Second)
+				if err == nil {
+					var parsed []interface{}
+					if s, ok := result.(string); ok && s != "" {
+						json.Unmarshal([]byte(s), &parsed)
+					}
+					if parsed == nil {
+						parsed = []interface{}{}
+					}
+					result = parsed
+				}
+
+			default:
+				err = fmt.Errorf("未知的 frame 子命令: %s（支持: eval/text/html/click/fill/css）", subCmd)
+			}
+
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR:", err)
+				os.Exit(1)
+			}
+			if result != nil {
+				switch v := result.(type) {
+				case string:
+					if v == "" {
+						fmt.Println("(empty)")
+					} else {
+						fmt.Println(v)
+					}
+				default:
+					b, _ := json.MarshalIndent(v, "", "  ")
+					fmt.Println(string(b))
+				}
+			}
+		},
+	}
+	browserCmd.AddCommand(frameCmd)
 }
 
 // ---- 辅助函数 ----
