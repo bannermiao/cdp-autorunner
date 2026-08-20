@@ -17,14 +17,27 @@ function waitTabLoad(id) {
   });
 }
 
+// chrome.debugger 同一时刻只能 attach 一个 tab。并发命令切换 tab 时，
+// detach 旧 tab 和 attach 新 tab 之间隔了 await，多个请求同时进来会互相踩踏
+// （attachedTab 赋值互相覆盖，后续 sendCommand 挂在未 attach 的 tab 上导致命令永不返回）。
+// 用 promise 链把所有 detach/attach 串行化，彻底消除这个竞态。
+let attachChain = Promise.resolve();
+function withAttachLock(fn) {
+  const p = attachChain.then(fn, fn);
+  attachChain = p.catch(() => {});
+  return p;
+}
+
 async function ensureAttached(tabId) {
-  if (attachedTab === tabId) return;
-  if (attachedTab !== null) {
-    try { await chrome.debugger.detach({ tabId: attachedTab }); } catch (_) {}
-    attachedTab = null;
-  }
-  await chrome.debugger.attach({ tabId }, '1.3');
-  attachedTab = tabId;
+  return withAttachLock(async () => {
+    if (attachedTab === tabId) return;
+    if (attachedTab !== null) {
+      try { await chrome.debugger.detach({ tabId: attachedTab }); } catch (_) {}
+      attachedTab = null;
+    }
+    await chrome.debugger.attach({ tabId }, '1.3');
+    attachedTab = tabId;
+  });
 }
 
 function detachDebugger() {
@@ -85,11 +98,28 @@ function handleTabs() {
     .catch(e => ({ ok: false, error: e.message }));
 }
 
+// attach 前清理可能的残留 attach。
+// 命令超时被 kill 的是 cdp-server 子进程，扩展端进程不受影响：
+// 若超时恰发生在 attach 与 detach 之间，该 target 的 attach 会残留，
+// 下次 attach 同一 target 会报 "Another debugger is already attached"。
+async function attachTarget(targetId) {
+  try {
+    await chrome.debugger.attach({ targetId }, '1.3');
+  } catch (e) {
+    if (/already attached/i.test(e.message)) {
+      try { await chrome.debugger.detach({ targetId }); } catch (_) {}
+      await chrome.debugger.attach({ targetId }, '1.3');
+    } else {
+      throw e;
+    }
+  }
+}
+
 // 在指定 targetId 上执行 JS（attach → evaluate → detach），支持并发
 async function execOnTarget(targetId, code) {
   const expression = '(function(){ return ' + code + ' })()';
   try {
-    await chrome.debugger.attach({ targetId }, '1.3');
+    await attachTarget(targetId);
     const r = await chrome.debugger.sendCommand({ targetId }, 'Runtime.evaluate', {
       expression, returnByValue: true, awaitPromise: true
     });
@@ -102,7 +132,7 @@ async function execOnTarget(targetId, code) {
 // 在指定 targetId 上执行 CDP 命令（attach → 命令 → detach），支持并发
 async function cdpOnTarget(targetId, method, params) {
   try {
-    await chrome.debugger.attach({ targetId }, '1.3');
+    await attachTarget(targetId);
     const r = await chrome.debugger.sendCommand({ targetId }, method, params || {});
     await chrome.debugger.detach({ targetId });
     return { ok: true, data: r };
@@ -161,12 +191,45 @@ async function handleExt(c) {
     catch (e) { return { ok: false, error: e.message }; }
   }
 
+  // 新建标签页并返回 targetId。用 chrome.tabs.create + getTargets 匹配，
+  // 完全不碰 sharedTab/attachedTab 共享单例，支持多客户端并发 new-tab。
+  if (action === 'newTab') {
+    try {
+      const url = c.url || 'about:blank';
+      const tab = await chrome.tabs.create({ url, active: false });
+      // 等待加载完成，带 3s 兜底（监听器可能错过 already-complete 的 tab）
+      await Promise.race([waitTabLoad(tab.id), new Promise(r => setTimeout(r, 3000))]);
+      // 轮询等 target 出现在 getTargets 里（tab 刚创建时可能尚未注册）
+      let tid = null;
+      for (let i = 0; i < 10 && !tid; i++) {
+        const targets = await chrome.debugger.getTargets();
+        const t = targets.find(x => x.type === 'page' && x.tabId === tab.id);
+        if (t) tid = t.id; else await new Promise(r => setTimeout(r, 100));
+      }
+      return { ok: true, data: { tabId: tab.id, targetId: tid } };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
+
+  // 按 targetId 或 tabId 精确关闭标签页（不再删"当前活动 tab"，避免并发下关错）
+  if (action === 'closeTab') {
+    try {
+      let tabId = c.tabId;
+      if (tabId == null && c.targetId) {
+        const targets = await chrome.debugger.getTargets();
+        const t = targets.find(x => x.id === c.targetId);
+        if (t) tabId = t.tabId;
+      }
+      if (tabId != null) await chrome.tabs.remove(tabId);
+      return { ok: true, data: 'closed' };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
+
   // 在指定 targetId 上执行 JS（attach → evaluate → detach）
   if (action === 'evalOnTarget') {
     const targetId = c.targetId;
     const expression = c.expression;
     try {
-      await chrome.debugger.attach({ targetId }, '1.3');
+      await attachTarget(targetId);
       const r = await chrome.debugger.sendCommand({ targetId }, 'Runtime.evaluate', {
         expression, returnByValue: true, awaitPromise: true
       });
@@ -182,7 +245,7 @@ async function handleExt(c) {
     const method = c.method;
     const params = c.params || {};
     try {
-      await chrome.debugger.attach({ targetId }, '1.3');
+      await attachTarget(targetId);
       const r = await chrome.debugger.sendCommand({ targetId }, method, params);
       await chrome.debugger.detach({ targetId });
       return { ok: true, data: r };

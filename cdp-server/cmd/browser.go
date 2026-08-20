@@ -362,11 +362,13 @@ func registerAllBrowserCommands() {
 			if len(args) == 1 {
 				targetURL = args[0]
 			}
-			result, err := ws.SendCDP("Target.createTarget", map[string]interface{}{"url": targetURL})
+			// 走扩展端 newTab action（chrome.tabs.create + getTargets），
+			// 不碰 sharedTab/attachedTab 单例，支持并发 new-tab
+			data, err := ws.SendExt("newTab", map[string]interface{}{"url": targetURL}, 15*time.Second)
 			if err != nil {
 				return nil, err
 			}
-			m, _ := result.(map[string]interface{})
+			m, _ := data.(map[string]interface{})
 			tid := ""
 			if m != nil {
 				tid, _ = m["targetId"].(string)
@@ -469,9 +471,18 @@ func registerAllBrowserCommands() {
 	})
 
 	def(browserCmdDef{
-		use: "close-tab", short: "关闭当前标签页",
-		argsMin: 0, argsMax: 0,
+		use: "close-tab [targetId]", short: "关闭标签页（默认活动标签页，可指定 targetId 精确关闭）",
+		argsMin: 0, argsMax: 1,
 		run: func(args []string) (interface{}, error) {
+			if len(args) >= 1 {
+				// 按 targetId 精确关闭（并发安全，扩展端通过 getTargets 反查 tabId）
+				_, err := ws.SendExt("closeTab", map[string]interface{}{"targetId": args[0]}, 15*time.Second)
+				if err != nil {
+					return nil, err
+				}
+				return "CLOSE-TAB: " + args[0], nil
+			}
+			// 兼容旧行为：关闭当前活动标签页
 			ws.SendEval("(async()=>{const tab=await chrome.tabs.query({active:true,currentWindow:true});if(tab[0])await chrome.tabs.remove(tab[0].id);return 'ok'})()", 10*time.Second)
 			return "CLOSE-TAB: ok", nil
 		},

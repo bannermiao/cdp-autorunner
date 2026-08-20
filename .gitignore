@@ -1,5 +1,6 @@
 # 编译产物
 *.exe
+*~
 cdp-server-darwin-*
 cdp-server-linux-*
 *.gz

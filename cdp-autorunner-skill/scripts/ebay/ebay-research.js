@@ -22,32 +22,74 @@
  * 纯 Node 标准库 + cdp-server (CDP-autorunner-skill)，零 npm 依赖。
  */
 
-const { spawnSync, fork } = require('child_process');
+const { spawn, fork } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
 // ---- 定位 cdp-server ----
-// 从 skill scripts/ 目录加载二进制，找不到则回退到 PATH
+// 优先用同目录下的 cdp-server，其次用 skill 自带二进制，最后回退到 PATH
+const SKILL_BIN = path.join(
+  os.homedir(), '.codebuddy', 'skills', 'cdp-autorunner-skill', 'scripts', 'cdp-server'
+);
 const CDP_BIN = (() => {
   const name = process.platform === 'win32' ? 'cdp-server.exe' : 'cdp-server';
-  const full = path.join(__dirname, '..', name);
-  if (fs.existsSync(full)) return full;
+  const candidates = [
+    path.join(__dirname, name),
+    SKILL_BIN + (process.platform === 'win32' ? '.exe' : ''),
+    name,
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
   return name;
 })();
 
+// 按命令类型给不同超时：goto 页面加载+标题轮询给 30s，
+// waitfor 按传入超时+5s 余量（正常 TIMEOUT 要能返回），其余 20s。
+// 任何命令超时都 kill 子进程并抛错，绝不无限阻塞（原 spawnSync 60s 死等是卡死根源）。
+function cdpTimeout(args) {
+  const cmd = args[0];
+  if (cmd === 'goto' || cmd === 'goto-target') return 30000;
+  if (cmd === 'waitfor' || cmd === 'waitfor-target') {
+    const t = parseInt(args[args.length - 1], 10);
+    return (isNaN(t) ? 8000 : t) + 5000;
+  }
+  if (cmd === 'new-tab' || cmd === 'close-tab' || cmd === 'switch-tab') return 15000;
+  return 20000;
+}
+
 function cdp(...args) {
-  const result = spawnSync(CDP_BIN, ['browser', ...args], {
-    encoding: 'utf-8', timeout: 60000, windowsHide: true,
+  const timeoutMs = cdpTimeout(args);
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const child = spawn(CDP_BIN, ['browser', ...args], { windowsHide: true });
+    let stdout = '', stderr = '';
+    let settled = false;
+    const finish = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch (_) {}
+      if (process.platform === 'win32') {
+        try { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch (_) {}
+      }
+      finish(reject, new Error(`cdp ${args[0]} 超时(${timeoutMs}ms)`));
+    }, timeoutMs);
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('error', (e) => { clearTimeout(timer); finish(reject, e); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const ms = Date.now() - started;
+      if (ms > 5000) console.log(`[cdp:slow] ${args[0]} ${ms}ms`);
+      if (code !== 0) finish(reject, new Error(stderr.trim() || `cdp ${args[0]} exit ${code}`));
+      else finish(resolve, stdout.trim());
+    });
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(result.stderr?.trim() || `exit code ${result.status}`);
-  return result.stdout ? result.stdout.trim() : '';
 }
 
 // 执行页面 JS。cdp exec 对多行文件不稳定，统一压成单行（去注释/换行）后用 eval，
 // 但保留临时文件 exec 作为首选（部分复杂 IIFE 需文件上下文）。
-function evalJS(code) {
+async function evalJS(code) {
   const oneLine = code
     .replace(/\/\/.*$/gm, '')   // 去行内注释
     .replace(/\n/g, ' ')        // 换行转空格
@@ -56,7 +98,7 @@ function evalJS(code) {
   try {
     const tmpFile = path.join(os.tmpdir(), `cdp-eval-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.js`);
     fs.writeFileSync(tmpFile, code, 'utf-8');
-    const r = cdp('exec', tmpFile);
+    const r = await cdp('exec', tmpFile);
     if (r && r !== '(empty)') return r;
   } catch (_) {
     // exec 失败，回退到单行 eval
@@ -68,13 +110,14 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ---- 阶段一：列表页仅提取商品链接 ----
 
-function researchList(keyword) {
+async function researchList(keyword) {
   const url = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keyword)}&_ipg=240`;
   console.log(`[列表] 搜索: ${keyword}`);
-  cdp('goto', url);
-  cdp('waitfor', 'ul.srp-results', '10000');
+  await cdp('goto', url);
+  await cdp('waitfor', 'ul.srp-results', '10000');
 
-  const raw = evalJS(`
+  // 稳定采样：卡片是懒加载的，连续两次采样数量一致才认为渲染完成
+  const EXTRACT_LIST_JS = `
 JSON.stringify(
   Array.from(document.querySelectorAll('li.s-card[data-listingid]'))
     .filter(item => !item.dataset.listingid.startsWith('2500'))
@@ -84,16 +127,31 @@ JSON.stringify(
     })
     .filter(link => link && link.includes('/itm/'))
 )
-  `);
-  if (!raw || raw === '(empty)') { console.log('未找到商品'); return []; }
-  try {
-    const links = JSON.parse(raw);
-    console.log(`[列表] 提取到 ${links.length} 个商品链接`);
-    return links;
-  } catch (_) {
-    console.log('解析列表数据失败');
-    return [];
+  `;
+
+  const MAX_SAMPLES = 6;        // 最多采样 6 次（约 7.5 秒）
+  const SAMPLE_INTERVAL = 1500; // 每次间隔 1.5 秒
+  let links = [];
+  let prevCount = -1;
+
+  for (let s = 0; s < MAX_SAMPLES; s++) {
+    if (s > 0) await sleep(SAMPLE_INTERVAL);
+    const raw = await evalJS(EXTRACT_LIST_JS);
+    if (!raw || raw === '(empty)') continue;
+    try {
+      links = JSON.parse(raw);
+    } catch (_) {
+      continue;
+    }
+    const stable = links.length === prevCount;
+    console.log(`[列表] 第 ${s + 1}/${MAX_SAMPLES} 次采样: ${links.length} 个链接${stable ? ' (稳定)' : ''}`);
+    if (stable) break;              // 连续两次一致 → 渲染完成
+    prevCount = links.length;
+    if (links.length >= 240) break; // 已达 _ipg=240 上限 → 无需再等
   }
+
+  console.log(`[列表] 提取到 ${links.length} 个商品链接`);
+  return links;
 }
 
 // ---- 阶段二：详情页提取（参考 ebay-batch-detail.js） ----
@@ -144,7 +202,52 @@ const DETAIL_EXTRACT_JS = `
     var m = pattern.exec(scripts[i].textContent);
     if (m) { jsonRaw = m[1]; break; }
   }
-  if (!jsonRaw) throw new Error('无法解析商品JSON信息');
+  var info = {
+    item_id: null, title: null, sale_price: null, currency: null,
+    image: null, sold: 0, compatible_vehicles: 0, specifics_item: null,
+    seller_name: null, store_name: null, positive_rate: null
+  };
+
+  // ---- 新版页面 fallback：页面无 $M_96613636_C 数据时，改用 JSON-LD + DOM ----
+  if (!jsonRaw) {
+    var lds = document.querySelectorAll('script[type="application/ld+json"]');
+    for (var li = 0; li < lds.length; li++) {
+      try {
+        var p = JSON.parse(lds[li].textContent);
+        if (p && p['@type'] === 'Product') {
+          if (p.name) info.title = p.name;
+          if (p.image) {
+            if (Array.isArray(p.image) && p.image.length > 0) {
+              var f2 = p.image[0];
+              info.image = typeof f2 === 'string' ? f2 : (f2.url || null);
+            } else if (typeof p.image === 'string') info.image = p.image;
+            else if (p.image.url) info.image = p.image.url;
+          }
+          if (p.offers) {
+            if (p.offers.price != null) info.sale_price = parseFloat(p.offers.price);
+            if (p.offers.priceCurrency) info.currency = p.offers.priceCurrency;
+          }
+          break;
+        }
+      } catch (e) {}
+    }
+    var sellerEl = document.querySelector('.x-sellercard-atf__about-seller');
+    if (sellerEl) {
+      var st = sellerEl.textContent.trim().replace(/\\s*\\([\\d,.]+\\)\\s*$/, '').trim();
+      if (st) info.seller_name = st;
+    }
+    var cardEl = document.querySelector('.x-sellercard-atf');
+    if (cardEl) {
+      var rm2 = cardEl.textContent.match(/(\\d+(?:\\.\\d+)?)%\\s*positive/i);
+      if (rm2) info.positive_rate = parseFloat(rm2[1]);
+    }
+    var qty2 = document.querySelectorAll('#qtyAvailability span');
+    if (qty2.length > 0) {
+      var sm2 = qty2[qty2.length - 1].textContent.trim().match(/([\\d,]+)\\s*sold/i);
+      if (sm2) info.sold = parseInt(sm2[1].replace(/,/g, ''), 10) || 0;
+    }
+    return JSON.stringify(info);
+  }
 
   var modules = {};
   try {
@@ -154,12 +257,6 @@ const DETAIL_EXTRACT_JS = `
       if (mod.length > 2 && 'model' in mod[2]) { modules = mod[2].model.modules; break; }
     }
   } catch (e) { throw new Error('解析商品脚本出错: ' + e.message); }
-
-  var info = {
-    item_id: null, title: null, sale_price: null, currency: null,
-    image: null, sold: 0, compatible_vehicles: 0, specifics_item: null,
-    seller_name: null, store_name: null, positive_rate: null
-  };
 
   // JSON-LD
   if (modules.JSONLD && modules.JSONLD.product) {
@@ -261,29 +358,28 @@ async function fetchDetail(url) {
   const MAX_RETRY = 3;
   for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
     try {
-      cdp('goto', url);
-      try {
-        cdp('waitfor', '.x-buybox-cta li', '10000');
-      } catch (_) {
-        cdp('waitfor', 'h1', '6000');
-      }
+      // 1) 导航。不做反爬预判：waitfor 本身就是检测，能等到正确元素说明页面加载正常
+      await cdp('goto', url);
+
+      // 2) 等待 buybox。注意：waitfor 超时输出 TIMEOUT 且 exit 0（不抛错），
+      //    必须按返回值判断。TIMEOUT 说明被反爬或页面异常，最多等 10s 就按失败处理
+      const w1 = await cdp('waitfor', '.x-buybox-cta li', '10000');
+      const pageOk = w1.startsWith('FOUND') || (await cdp('waitfor', 'h1', '6000')).startsWith('FOUND');
       await sleep(1500);
 
-      const bodyText = cdp('eval', "(function(){return document.body.innerText.substring(0,200);})()");
-      if (/Pardon Our Interruption/i.test(bodyText)) {
-        await sleep(2000 * (attempt + 1));
-        continue;
-      }
-
-      const raw = evalJS(DETAIL_EXTRACT_JS);
-      if (raw && raw.startsWith('{')) {
-        const d = JSON.parse(raw);
-        if (d.title) {
-          d.url = url;
-          const idMatch = url.match(/\/itm\/(\d+)/);
-          if (idMatch) d.item_id = idMatch[1];
-          return d;
+      if (pageOk) {
+        const raw = await evalJS(DETAIL_EXTRACT_JS);
+        if (raw && raw.startsWith('{')) {
+          const d = JSON.parse(raw);
+          if (d.title) {
+            d.url = url;
+            const idMatch = url.match(/\/itm\/(\d+)/);
+            if (idMatch) d.item_id = idMatch[1];
+            return d;
+          }
         }
+      } else {
+        console.log(`[详情] 页面异常(疑似反爬)：${url}`);
       }
       if (attempt < MAX_RETRY - 1) await sleep(1500 * (attempt + 1));
     } catch (e) {
@@ -303,11 +399,11 @@ async function fetchDetail(url) {
 // 获取 purchaseHistory 页面的90天销售数据
 async function fetchSalesHistory(itemId) {
   try {
-    cdp('goto', `https://www.ebay.com/bin/purchaseHistory?item=${itemId}`);
-    cdp('waitfor', 'table', '8000');
+    await cdp('goto', `https://www.ebay.com/bin/purchaseHistory?item=${itemId}`);
+    await cdp('waitfor', 'table', '8000');
     await sleep(1000);
 
-    const raw = evalJS(PURCHASE_HISTORY_EXTRACT_JS);
+    const raw = await evalJS(PURCHASE_HISTORY_EXTRACT_JS);
     if (!raw || raw === '(empty)') return { sold_90days: 0, avg_price_90days: 0, min_price_90days: 0, max_price_90days: 0 };
 
     const rows = JSON.parse(raw);
@@ -370,6 +466,9 @@ async function enrichWithDetails(urls, limit, concurrency) {
 
       workers.push(worker);
 
+      // 转发 Worker 的 stdout（target 就绪、步骤耗时、cdp:slow 等关键日志）
+      worker.stdout.on('data', (data) => { process.stdout.write(data); });
+
       // 收集 Worker 的 stderr 输出
       let stderrBuf = '';
       worker.stderr.on('data', (data) => { stderrBuf += data.toString(); });
@@ -393,6 +492,10 @@ async function enrichWithDetails(urls, limit, concurrency) {
               const ib = capped.indexOf(b.url);
               return ia - ib;
             });
+            // 通知所有 Worker 退出，回收子进程
+            for (const w of workers) {
+              try { w.send({ type: 'exit' }); } catch (_) {}
+            }
             console.log(`[详情] 所有 Worker 完成，共 ${allResults.length} 个商品`);
             resolve(allResults);
           }
@@ -417,15 +520,37 @@ async function enrichWithDetails(urls, limit, concurrency) {
 
 // ---- 主流程 ----
 
+// 解析 CLI 参数：同时支持 --limit N 与 --limit=N 两种写法
+function parseCliArgs(argv) {
+  const opts = {};
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--report' || a === '--no-detail') {
+      opts[a.slice(2)] = true;
+      continue;
+    }
+    const eq = a.match(/^--([^=]+)=(.*)$/);
+    if (eq) {
+      opts[eq[1]] = eq[2];
+      continue;
+    }
+    if ((a === '--limit' || a === '--concurrency') && argv[i + 1] && !argv[i + 1].startsWith('--')) {
+      opts[a.slice(2)] = argv[i + 1];
+      i++;
+      continue;
+    }
+    positional.push(a);
+  }
+  return { opts, positional };
+}
+
 function research() {
-  const args = process.argv.slice(2);
-  const reportFlag = args.includes('--report');
-  const noDetail = args.includes('--no-detail');
-  const limitArg = args.find(a => a.startsWith('--limit='));
-  const limit = limitArg ? parseInt(limitArg.split('=')[1]) : 0;
-  const concurrencyArg = args.find(a => a.startsWith('--concurrency='));
-  const concurrency = concurrencyArg ? parseInt(concurrencyArg.split('=')[1]) : 1;
-  const positional = args.filter(a => !a.startsWith('--'));
+  const { opts, positional } = parseCliArgs(process.argv.slice(2));
+  const reportFlag = opts.report || false;
+  const noDetail = opts['no-detail'] || false;
+  const limit = parseInt(opts.limit || '0', 10) || 0;
+  const concurrency = parseInt(opts.concurrency || '1', 10) || 1;
 
   const keyword = positional[0];
   const outputArg = positional[1];
@@ -451,7 +576,7 @@ function research() {
 
   (async () => {
     // 阶段一：列表页仅获取链接
-    let urls = researchList(keyword);
+    let urls = await researchList(keyword);
     if (urls.length === 0) { console.log('未提取到商品'); process.exit(0); }
 
     // 阶段二：详情+90天销售（可跳过）
@@ -570,6 +695,7 @@ tr:hover { background: #f7fafc; }
           <th onclick="sortBy('title')">标题 <span class="arrow">▾<\/span><\/th>
           <th onclick="sortBy('sale_price')">价格 <span class="arrow">▾<\/span><\/th>
           <th onclick="sortBy('seller_name')">卖家 <span class="arrow">▾<\/span><\/th>
+          <th onclick="sortBy('positive_rate')">好评率 <span class="arrow">▾<\/span><\/th>
           <th onclick="sortBy('sold_90days')">90天销量 <span class="arrow">▾<\/span><\/th>
           <th onclick="sortBy('avg_price_90days')">90天均价 <span class="arrow">▾<\/span><\/th>
           <th onclick="sortBy('sold')">总销量 <span class="arrow">▾<\/span><\/th>
@@ -630,7 +756,8 @@ function applyPage(){
       '<td><img class="img-thumb" src="'+(d.image||'')+'" alt="" loading="lazy" onerror="this.style.display=\\'none\\'"><\/td>'+
       '<td class="title-col"><a href="'+(d.url||d.link||'')+'" target="_blank">'+t+'<\/a><\/td>'+
       '<td class="price">'+(d.currency||'$')+(d.sale_price?d.sale_price.toFixed(2):'?')+'<\/td>'+
-      '<td><span class="seller-badge">'+(d.seller_name||'-')+'<\/span>'+(d.positive_rate?('<br><small>'+(d.positive_rate).toFixed(1)+'%<\/small>'):'')+'<\/td>'+
+      '<td><span class="seller-badge">'+(d.seller_name||'-')+'<\/span><\/td>'+
+      '<td>'+(d.positive_rate?d.positive_rate.toFixed(1)+'%':'-')+'<\/td>'+
       '<td>'+(d.sold_90days?d.sold_90days.toLocaleString()+' 件':'-')+'<\/td>'+
       '<td>'+(d.avg_price_90days?'$'+d.avg_price_90days.toFixed(2):'-')+'<\/td>'+
       '<td>'+(d.sold?d.sold.toLocaleString():'-')+'<\/td>'+

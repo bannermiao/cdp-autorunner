@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CDP Bridge",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "通过 WebSocket 连接真实浏览器，执行 CDP 命令",
   "permissions": [
     "debugger",

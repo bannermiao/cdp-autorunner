@@ -11,27 +11,68 @@
  *   收到: { type: 'exit' }
  */
 
-const { spawnSync, spawn } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
 // ---- 定位 cdp-server ----
-// 从 skill scripts/ 目录加载二进制，找不到则回退到 PATH
+const SKILL_BIN = path.join(
+  os.homedir(), '.codebuddy', 'skills', 'cdp-autorunner-skill', 'scripts', 'cdp-server'
+);
 const CDP_BIN = (() => {
   const name = process.platform === 'win32' ? 'cdp-server.exe' : 'cdp-server';
-  const full = path.join(__dirname, '..', name);
-  if (fs.existsSync(full)) return full;
+  const candidates = [
+    path.join(__dirname, name),
+    SKILL_BIN + (process.platform === 'win32' ? '.exe' : ''),
+    name,
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
   return name;
 })();
 
+// 按命令类型给不同超时：goto-target 页面加载+标题轮询给 30s，
+// waitfor-target 按传入超时+5s 余量（正常 TIMEOUT 要能返回），其余 20s。
+// 任何命令超时都 kill 子进程并抛错，绝不无限阻塞（原 spawnSync 60s 死等是卡死根源）。
+function cdpTimeout(args) {
+  const cmd = args[0];
+  if (cmd === 'goto' || cmd === 'goto-target') return 30000;
+  if (cmd === 'waitfor' || cmd === 'waitfor-target') {
+    const t = parseInt(args[args.length - 1], 10);
+    return (isNaN(t) ? 8000 : t) + 5000;
+  }
+  if (cmd === 'new-tab' || cmd === 'close-tab' || cmd === 'switch-tab') return 15000;
+  return 20000;
+}
+
 function cdp(...args) {
-  const result = spawnSync(CDP_BIN, ['browser', ...args], {
-    encoding: 'utf-8', timeout: 60000, windowsHide: true,
+  const timeoutMs = cdpTimeout(args);
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const child = spawn(CDP_BIN, ['browser', ...args], { windowsHide: true });
+    let stdout = '', stderr = '';
+    let settled = false;
+    const finish = (fn, val) => { if (!settled) { settled = true; fn(val); } };
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch (_) {}
+      if (process.platform === 'win32') {
+        try { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch (_) {}
+      }
+      finish(reject, new Error(`cdp ${args[0]} 超时(${timeoutMs}ms)`));
+    }, timeoutMs);
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('error', (e) => { clearTimeout(timer); finish(reject, e); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const ms = Date.now() - started;
+      if (ms > 5000) console.log(`[Worker ${process.env.WORKER_ID || 0}] [cdp:slow] ${args[0]} ${ms}ms`);
+      if (code !== 0) finish(reject, new Error(stderr.trim() || `cdp ${args[0]} exit ${code}`));
+      else finish(resolve, stdout.trim());
+    });
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0) throw new Error(result.stderr?.trim() || `exit code ${result.status}`);
-  return result.stdout ? result.stdout.trim() : '';
 }
 
 // 每个 Worker 专属的 targetId（由 new-tab 创建，后续所有操作都指向它，实现真正并发）
@@ -47,28 +88,66 @@ function waitfor(sel, timeout) {
   return cdp('waitfor', sel, timeout);
 }
 
-function evalJS(code) {
+async function evalJS(code) {
+  // 有专属 target 时：eval-target 的 code 参数支持多行 JS，直接传源码执行
+  if (targetId) return cdp('eval-target', targetId, code);
   const oneLine = code
     .replace(/\/\/.*$/gm, '')
     .replace(/\n/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  if (targetId) {
-    try {
-      const tmpFile = path.join(os.tmpdir(), `cdp-eval-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.js`);
-      fs.writeFileSync(tmpFile, code, 'utf-8');
-      const r = cdp('eval-target', targetId, tmpFile);
-      if (r && r !== '(empty)') return r;
-    } catch (_) {}
-    return cdp('eval-target', targetId, oneLine);
-  }
   try {
     const tmpFile = path.join(os.tmpdir(), `cdp-eval-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.js`);
     fs.writeFileSync(tmpFile, code, 'utf-8');
-    const r = cdp('exec', tmpFile);
+    const r = await cdp('exec', tmpFile);
     if (r && r !== '(empty)') return r;
   } catch (_) {}
   return cdp('eval', oneLine);
+}
+
+// 超时/异常后重置 target：先关掉可能残留 attach 的旧 tab，再建新 tab。
+// 防止扩展端 chrome.debugger.attach 单例被某个挂死命令占用后，后续命令全部排队卡死。
+async function resetTarget() {
+  if (targetId) {
+    try { await cdp('close-tab', targetId); } catch (_) {}
+    targetId = null;
+  }
+  try {
+    const out = await cdp('new-tab', 'about:blank');
+    const m = out.match(/NEW-TAB:\s*(\S+)/);
+    if (m && m[1]) targetId = m[1];
+  } catch (_) {}
+}
+
+// 初始化专属 target：new-tab 后立即用 eval-target 执行简单 JS 做"预热验证"，
+// 确认 attach 链路真正可用。两个 worker 同时 new-tab 会撞扩展端 attach 单例，
+// 导致首个 target 后续命令挂起（表现为"详情页开了但程序不动"）。
+// 这里失败立即关掉重建，最多 3 次，把冲突解决在初始化阶段而非第一个商品。
+async function initTarget(workerId) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const out = await cdp('new-tab', 'about:blank');
+      const m = out.match(/NEW-TAB:\s*(\S+)/);
+      if (!m || !m[1]) throw new Error('new-tab 未返回 targetId');
+      targetId = m[1];
+      // 预热验证：执行简单 JS，确认 target 可正常 attach/操作
+      const r = await cdp('eval-target', targetId, '1+1');
+      if (r && r.includes('2')) {
+        console.log(`[Worker ${workerId}] target 就绪: ${targetId}`);
+        return true;
+      }
+      throw new Error(`预热验证失败: ${r}`);
+    } catch (e) {
+      console.log(`[Worker ${workerId}] target 初始化异常(${e.message})，第 ${attempt + 1} 次重建`);
+      if (targetId) {
+        try { await cdp('close-tab', targetId); } catch (_) {}
+        targetId = null;
+      }
+      await sleep(1500 * (attempt + 1));
+    }
+  }
+  console.log(`[Worker ${workerId}] target 初始化失败，回退共享 tab`);
+  return false;
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -123,7 +202,52 @@ const DETAIL_EXTRACT_JS = `
     var m = pattern.exec(scripts[i].textContent);
     if (m) { jsonRaw = m[1]; break; }
   }
-  if (!jsonRaw) throw new Error('无法解析商品JSON信息');
+  var info = {
+    item_id: null, title: null, sale_price: null, currency: null,
+    image: null, sold: 0, compatible_vehicles: 0, specifics_item: null,
+    seller_name: null, store_name: null, positive_rate: null
+  };
+
+  // ---- 新版页面 fallback：页面无 $M_96613636_C 数据时，改用 JSON-LD + DOM ----
+  if (!jsonRaw) {
+    var lds = document.querySelectorAll('script[type="application/ld+json"]');
+    for (var li = 0; li < lds.length; li++) {
+      try {
+        var p = JSON.parse(lds[li].textContent);
+        if (p && p['@type'] === 'Product') {
+          if (p.name) info.title = p.name;
+          if (p.image) {
+            if (Array.isArray(p.image) && p.image.length > 0) {
+              var f2 = p.image[0];
+              info.image = typeof f2 === 'string' ? f2 : (f2.url || null);
+            } else if (typeof p.image === 'string') info.image = p.image;
+            else if (p.image.url) info.image = p.image.url;
+          }
+          if (p.offers) {
+            if (p.offers.price != null) info.sale_price = parseFloat(p.offers.price);
+            if (p.offers.priceCurrency) info.currency = p.offers.priceCurrency;
+          }
+          break;
+        }
+      } catch (e) {}
+    }
+    var sellerEl = document.querySelector('.x-sellercard-atf__about-seller');
+    if (sellerEl) {
+      var st = sellerEl.textContent.trim().replace(/\\s*\\([\\d,.]+\\)\\s*$/, '').trim();
+      if (st) info.seller_name = st;
+    }
+    var cardEl = document.querySelector('.x-sellercard-atf');
+    if (cardEl) {
+      var rm2 = cardEl.textContent.match(/(\\d+(?:\\.\\d+)?)%\\s*positive/i);
+      if (rm2) info.positive_rate = parseFloat(rm2[1]);
+    }
+    var qty2 = document.querySelectorAll('#qtyAvailability span');
+    if (qty2.length > 0) {
+      var sm2 = qty2[qty2.length - 1].textContent.trim().match(/([\\d,]+)\\s*sold/i);
+      if (sm2) info.sold = parseInt(sm2[1].replace(/,/g, ''), 10) || 0;
+    }
+    return JSON.stringify(info);
+  }
 
   var modules = {};
   try {
@@ -133,12 +257,6 @@ const DETAIL_EXTRACT_JS = `
       if (mod.length > 2 && 'model' in mod[2]) { modules = mod[2].model.modules; break; }
     }
   } catch (e) { throw new Error('解析商品脚本出错: ' + e.message); }
-
-  var info = {
-    item_id: null, title: null, sale_price: null, currency: null,
-    image: null, sold: 0, compatible_vehicles: 0, specifics_item: null,
-    seller_name: null, store_name: null, positive_rate: null
-  };
 
   if (modules.JSONLD && modules.JSONLD.product) {
     var p = modules.JSONLD.product;
@@ -233,33 +351,41 @@ async function fetchDetail(url) {
   const MAX_RETRY = 3;
   for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
     try {
-      goto(url);
-      try {
-        waitfor('.x-buybox-cta li', '10000');
-      } catch (_) {
-        waitfor('h1', '6000');
-      }
+      // 1) 导航。不做反爬预判：waitfor 本身就是检测，能等到正确元素说明页面加载正常
+      let t0 = Date.now();
+      await goto(url);
+      const gotoMs = Date.now() - t0;
+
+      // 2) 等待 buybox。注意：waitfor 超时输出 TIMEOUT 且 exit 0（不抛错），
+      //    必须按返回值判断。TIMEOUT 说明被反爬或页面异常，最多等 10s 就按失败处理
+      t0 = Date.now();
+      const w1 = await waitfor('.x-buybox-cta li', '10000');
+      const w1ms = Date.now() - t0;
+      const pageOk = w1.startsWith('FOUND') || (await waitfor('h1', '6000')).startsWith('FOUND');
+      console.log(`[Worker ${process.env.WORKER_ID || 0}] goto ${gotoMs}ms / waitfor ${w1ms}ms(${w1.slice(0, 12)}) / pageOk=${pageOk}: ${url}`);
       await sleep(1500);
 
-      const bodyText = cdp('eval', "(function(){return document.body.innerText.substring(0,200);})()");
-      if (/Pardon Our Interruption/i.test(bodyText)) {
-        await sleep(2000 * (attempt + 1));
-        continue;
-      }
-
-      const raw = evalJS(DETAIL_EXTRACT_JS);
-      if (raw && raw.startsWith('{')) {
-        const d = JSON.parse(raw);
-        if (d.title) {
-          d.url = url;
-          const idMatch = url.match(/\/itm\/(\d+)/);
-          if (idMatch) d.item_id = idMatch[1];
-          return d;
+      if (pageOk) {
+        t0 = Date.now();
+        const raw = await evalJS(DETAIL_EXTRACT_JS);
+        console.log(`[Worker ${process.env.WORKER_ID || 0}] eval ${Date.now() - t0}ms`);
+        if (raw && raw.startsWith('{')) {
+          const d = JSON.parse(raw);
+          if (d.title) {
+            d.url = url;
+            const idMatch = url.match(/\/itm\/(\d+)/);
+            if (idMatch) d.item_id = idMatch[1];
+            return d;
+          }
         }
+      } else {
+        console.log(`[Worker ${process.env.WORKER_ID || 0}] 页面异常(疑似反爬)：${url}`);
       }
       if (attempt < MAX_RETRY - 1) await sleep(1500 * (attempt + 1));
     } catch (e) {
-      // retry
+      // 命令超时/异常：重置 target 清除扩展端残留状态，再重试
+      console.log(`[Worker ${process.env.WORKER_ID || 0}] 抓取异常(${e.message})，重置标签页后重试：${url}`);
+      await resetTarget();
     }
     await sleep(1500 * (attempt + 1));
   }
@@ -274,10 +400,10 @@ async function fetchDetail(url) {
 
 async function fetchSalesHistory(itemId) {
   try {
-    goto(`https://www.ebay.com/bin/purchaseHistory?item=${itemId}`);
-    waitfor('table', '8000');
+    await goto(`https://www.ebay.com/bin/purchaseHistory?item=${itemId}`);
+    await waitfor('table', '8000');
     await sleep(1000);
-    const raw = evalJS(PURCHASE_HISTORY_EXTRACT_JS);
+    const raw = await evalJS(PURCHASE_HISTORY_EXTRACT_JS);
     if (!raw || raw === '(empty)') return { sold_90days: 0, avg_price_90days: 0, min_price_90days: 0, max_price_90days: 0 };
     const rows = JSON.parse(raw);
     if (rows.length === 0) return { sold_90days: 0, avg_price_90days: 0, min_price_90days: 0, max_price_90days: 0 };
@@ -291,14 +417,13 @@ async function fetchSalesHistory(itemId) {
 
 // ---- 主逻辑 ----
 async function processUrls(urls, workerId) {
-  // 每个 Worker 创建自己的专属标签页，保存 targetId 供后续所有操作复用（真正并发）
-  try {
-    const out = cdp('new-tab', 'about:blank');
-    const m = out.match(/NEW-TAB:\s*(\S+)/);
-    if (m && m[1]) targetId = m[1];
-  } catch (_) {
-    // 忽略新标签页失败，回退到共享 tab
-  }
+  // 错开多 worker 的初始化时机：worker 0 立即建 tab，worker 1 延迟 800ms，
+  // 避免同时 new-tab 撞扩展端 attach 单例
+  if (workerId > 0) await sleep(workerId * 800);
+  // 创建专属标签页并预热验证，失败则自动重建（最多 3 次）
+  await initTarget(workerId);
+  // 注意：若 initTarget 返回 false，targetId 为 null，
+  // goto/waitfor/evalJS 会自动回退到共享 tab（非 target 版本）
 
   const results = [];
   for (let i = 0; i < urls.length; i++) {
