@@ -176,9 +176,32 @@ cd {cwd}
 | `goto <url>` | 导航到页面 | `goto "https://example.com"` |
 | `reload` | 刷新页面 | `reload` |
 | `scroll <px>` | 滚动（正数向下） | `scroll 500` |
-| `new-tab [url]` | 新建标签页 | `new-tab "https://..."` |
+| `new-tab [url]` | 新建标签页（返回 targetId） | `new-tab "https://..."` |
 | `switch-tab <n>` | 切换标签页（从0开始） | `switch-tab 0` |
 | `close-tab` | 关闭当前标签页 | `close-tab` |
+
+#### 多 target 并发操作
+| 命令 | 说明 | 示例 |
+|:-----|:-----|:------|
+| `goto-target <targetId> <url>` | 在指定 target 上导航 | `goto-target $TID "https://..."` |
+| `eval-target <targetId> <代码>` | 在指定 target 上执行 JS | `eval-target $TID "document.title"` |
+| `waitfor-target <targetId> <选择器> [超时]` | 在指定 target 上等待元素 | `waitfor-target $TID ".item" 5000` |
+
+> `new-tab` 返回的 `targetId` 可被上述 target 命令复用，从而在**多个独立标签页上并行执行、互不干扰**。每个 target 操作走 `chrome.debugger.attach({targetId}) → 操作 → detach`，天然支持并发，是多 Worker 并发的核心机制。
+
+#### 多 target 并发工作流
+
+```bash
+# 1. 为每个并发单元创建独立标签页，保存各自的 targetId
+T1=$("{skill_path}/scripts/cdp-server" browser new-tab "about:blank" | sed 's/NEW-TAB: //')
+T2=$("{skill_path}/scripts/cdp-server" browser new-tab "about:blank" | sed 's/NEW-TAB: //')
+
+# 2. 各 target 独立导航、独立执行（真正并行，互不干扰）
+"{skill_path}/scripts/cdp-server" browser goto-target "$T1" "https://example.com/page1"
+"{skill_path}/scripts/cdp-server" browser goto-target "$T2" "https://example.com/page2"
+"{skill_path}/scripts/cdp-server" browser eval-target "$T1" "document.title"
+"{skill_path}/scripts/cdp-server" browser eval-target "$T2" "document.title"
+```
 
 #### 元素查询
 | 命令 | 说明 | 示例 |
@@ -247,6 +270,15 @@ node {skill_path}/scripts/ebay/ebay-research.js "headlight" --report
 # 已有 JSON 数据生成报表
 node {skill_path}/scripts/ebay/ebay-research.js data.json
 ```
+
+**并发模式**：脚本支持多 Worker 并发，每个 Worker 通过 `new-tab` 创建独立 target，用 `goto-target` / `eval-target` / `waitfor-target` 操作自己的标签页，真正并行抓取、互不干扰：
+
+```bash
+# 并发抓取（每个 Worker 独立标签页，真正并行）
+node {skill_path}/scripts/ebay/ebay-research.js "headlight" --limit 20 --concurrency 3 --report
+```
+
+前置条件：cdp-server 二进制需为支持多 target 的版本（daemon 需用该版本重启），且 Chrome 扩展已重新加载。
 
 ### Google 搜索提取
 

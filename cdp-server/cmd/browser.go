@@ -376,6 +376,85 @@ func registerAllBrowserCommands() {
 	})
 
 	def(browserCmdDef{
+		use: "goto-target <targetId> <url>", short: "在指定 target 上导航",
+		argsMin: 2, argsMax: 2,
+		run: func(args []string) (interface{}, error) {
+			targetID, url := args[0], args[1]
+			_, err := ws.SendExt("cdpOnTarget", map[string]interface{}{
+				"targetId": targetID,
+				"method":   "Page.navigate",
+				"params":   map[string]interface{}{"url": url},
+			}, 30*time.Second)
+			if err != nil {
+				return nil, err
+			}
+			// 轮询页面标题，最多等 10 秒
+			titleStr := ""
+			for i := 0; i < 20; i++ {
+				time.Sleep(500 * time.Millisecond)
+				t, err := ws.SendExt("evalOnTarget", map[string]interface{}{
+					"targetId":   targetID,
+					"expression": "document.title",
+				}, 5*time.Second)
+				if err != nil {
+					continue
+				}
+				s := fmt.Sprint(t)
+				if s != "" && !strings.Contains(s, "Electronics, Cars") {
+					titleStr = s
+					break
+				}
+			}
+			return "TITLE: " + titleStr, nil
+		},
+	})
+
+	def(browserCmdDef{
+		use: "eval-target <targetId> <code> [文件]", short: "在指定 target 上执行 JS",
+		argsMin: 2, argsMax: 3,
+		run: func(args []string) (interface{}, error) {
+			targetID, code := args[0], args[1]
+			result, err := ws.SendExt("evalOnTarget", map[string]interface{}{
+				"targetId":   targetID,
+				"expression": code,
+			}, 30*time.Second)
+			if err != nil {
+				return nil, err
+			}
+			if len(args) == 3 {
+				out := resolvePath(args[2])
+				b, _ := json.MarshalIndent(result, "", "  ")
+				os.WriteFile(out, b, 0644)
+				return "FILE: " + out, nil
+			}
+			return formatResult(result), nil
+		},
+	})
+
+	def(browserCmdDef{
+		use: "waitfor-target <targetId> <选择器> [超时ms]", short: "在指定 target 上等待元素出现",
+		argsMin: 2, argsMax: 3,
+		run: func(args []string) (interface{}, error) {
+			targetID, sel := args[0], escapeJSStr(args[1])
+			timeoutMs := 10000
+			if len(args) == 3 {
+				if t, err := strconv.Atoi(args[2]); err == nil && t > 0 {
+					timeoutMs = t
+				}
+			}
+			code := fmt.Sprintf(`(function(){return new Promise((resolve,reject)=>{const el=document.querySelector('%[1]s');if(el)return resolve(true);const timer=setTimeout(()=>reject(new Error('timeout')),%[2]d);new MutationObserver((m,obs)=>{if(document.querySelector('%[1]s')){clearTimeout(timer);obs.disconnect();resolve(true)}}).observe(document.body,{childList:true,subtree:true})})})()`, sel, timeoutMs)
+			_, err := ws.SendExt("evalOnTarget", map[string]interface{}{
+				"targetId":   targetID,
+				"expression": code,
+			}, time.Duration(timeoutMs+2000)*time.Millisecond)
+			if err != nil {
+				return "TIMEOUT: " + args[1], nil
+			}
+			return "FOUND: " + args[1], nil
+		},
+	})
+
+	def(browserCmdDef{
 		use: "switch-tab <索引>", short: "切换标签页（从 0 开始）",
 		argsMin: 1, argsMax: 1,
 		run: func(args []string) (interface{}, error) {

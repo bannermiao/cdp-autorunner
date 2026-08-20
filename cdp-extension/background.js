@@ -85,31 +85,61 @@ function handleTabs() {
     .catch(e => ({ ok: false, error: e.message }));
 }
 
+// 在指定 targetId 上执行 JS（attach → evaluate → detach），支持并发
+async function execOnTarget(targetId, code) {
+  const expression = '(function(){ return ' + code + ' })()';
+  try {
+    await chrome.debugger.attach({ targetId }, '1.3');
+    const r = await chrome.debugger.sendCommand({ targetId }, 'Runtime.evaluate', {
+      expression, returnByValue: true, awaitPromise: true
+    });
+    await chrome.debugger.detach({ targetId });
+    if (r.exceptionDetails) return { ok: false, error: r.exceptionDetails.exception?.description || 'Runtime.evaluate error' };
+    return { ok: true, data: r.result.value };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// 在指定 targetId 上执行 CDP 命令（attach → 命令 → detach），支持并发
+async function cdpOnTarget(targetId, method, params) {
+  try {
+    await chrome.debugger.attach({ targetId }, '1.3');
+    const r = await chrome.debugger.sendCommand({ targetId }, method, params || {});
+    await chrome.debugger.detach({ targetId });
+    return { ok: true, data: r };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
 async function handleBatch(batch, tabId) {
-  const results = [];
-  for (const cmd of batch.commands) {
-    const tid = cmd.tabId || tabId;
-    let res;
+  // 并行执行所有命令（每个命令可指定独立 targetId，互不干扰）
+  const results = await Promise.all(batch.commands.map(async (cmd) => {
+    const tid = cmd.targetId || cmd.tabId || tabId;
     if (cmd.cmd === 'cdp') {
       const params = JSON.parse(JSON.stringify(cmd.params || {}).replace(/"\$(\d+)\.([^"]+)"/g, (_, i, path) => {
         let v = results[+i]; for (const k of path.split('.')) v = v?.[k]; return JSON.stringify(v);
       }));
-      res = await cdpCmd(cmd.method, params, tid);
+      if (tid && typeof tid === 'string' && tid.startsWith('target')) return cdpOnTarget(tid, cmd.method, params);
+      return cdpCmd(cmd.method, params, tid);
     } else if (cmd.cmd === 'exec') {
-      res = await handleExec(cmd.code || cmd.js, tid);
+      if (tid && typeof tid === 'string' && tid.startsWith('target')) return execOnTarget(tid, cmd.code || cmd.js);
+      return handleExec(cmd.code || cmd.js, tid);
     } else {
-      res = { ok: false, error: 'unknown cmd: ' + cmd.cmd };
+      return { ok: false, error: 'unknown cmd: ' + cmd.cmd };
     }
-    results.push(res);
-  }
+  }));
   return { ok: true, results };
 }
 
 async function handleMessage(data) {
   const c = data.code;
   if (c && typeof c === 'object') {
-    if (c.cmd === 'exec') return handleExec(c.code || c.js, c.tabId, c.url);
-    if (c.cmd === 'cdp') return cdpCmd(c.method, c.params, c.tabId, c.url);
+    if (c.cmd === 'exec') {
+      if (c.targetId) return execOnTarget(c.targetId, c.code || c.js);
+      return handleExec(c.code || c.js, c.tabId, c.url);
+    }
+    if (c.cmd === 'cdp') {
+      if (c.targetId) return cdpOnTarget(c.targetId, c.method, c.params);
+      return cdpCmd(c.method, c.params, c.tabId, c.url);
+    }
     if (c.cmd === 'tabs') return handleTabs();
     if (c.cmd === 'batch') return handleBatch(c, c.tabId);
     if (c.cmd === 'ext') return handleExt(c);

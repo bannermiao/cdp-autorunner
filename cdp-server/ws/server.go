@@ -15,7 +15,8 @@ import (
 // RunDaemon 启动 WS 中继服务
 func RunDaemon(port int) {
 	var extSocket *websocket.Conn
-	var curClient *websocket.Conn
+	// 多客户端支持：每个客户端连接有独立 id，响应按 id 路由回对应客户端
+	clients := make(map[string]*websocket.Conn)
 
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
@@ -45,14 +46,19 @@ func RunDaemon(port int) {
 				if err != nil {
 					if conn == extSocket {
 						extSocket = nil
-					} else if conn == curClient {
-						curClient = nil
+					}
+					// 清理已断开的客户端
+					for id, c := range clients {
+						if c == conn {
+							delete(clients, id)
+						}
 					}
 					return
 				}
 
 				var parsed struct {
 					Type string `json:"type"`
+					ID   string `json:"id"`
 				}
 				if err := json.Unmarshal(msg, &parsed); err != nil {
 					continue
@@ -69,13 +75,19 @@ func RunDaemon(port int) {
 				}
 
 				if conn == extSocket {
-					if curClient != nil {
-						curClient.WriteMessage(websocket.TextMessage, msg)
+					// 扩展返回的响应，按 id 路由回对应客户端
+					if parsed.ID != "" {
+						if c, ok := clients[parsed.ID]; ok {
+							c.WriteMessage(websocket.TextMessage, msg)
+						}
 					}
 					continue
 				}
 
-				curClient = conn
+				// 客户端连接：注册到 map（用请求 id 作为 key），转发给扩展
+				if parsed.ID != "" {
+					clients[parsed.ID] = conn
+				}
 				if extSocket != nil {
 					extSocket.WriteMessage(websocket.TextMessage, msg)
 				} else {

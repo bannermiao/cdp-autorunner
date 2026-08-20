@@ -415,6 +415,72 @@ CLOSE-TAB: ok
 
 ---
 
+### 多 target 并发操作
+
+`new-tab` 返回的 `targetId` 可被 `goto-target` / `eval-target` / `waitfor-target` 复用，从而在**多个独立标签页上并行执行**，互不干扰。这是实现多 Worker 并发的核心机制。
+
+> 原理：每个 target 操作走 `chrome.debugger.attach({targetId}) → 操作 → detach`，不同 target 之间完全独立，天然支持并发。
+
+#### `goto-target <targetId> <url>`
+
+在指定 target 上导航，并轮询等待页面标题加载完成。
+
+```
+cdp-server browser goto-target {targetId} "https://www.example.com"
+```
+
+✅ 输出格式：
+```
+TITLE: Example Domain
+```
+
+#### `eval-target <targetId> <代码> [文件]`
+
+在指定 target 上执行 JS 表达式。可选将结果写入文件。
+
+```
+cdp-server browser eval-target {targetId} "document.title"
+cdp-server browser eval-target {targetId} "JSON.stringify(...)" output.json
+```
+
+✅ 输出格式：同 `eval`（直接输出结果值）。
+
+#### `waitfor-target <targetId> <选择器> [超时ms]`
+
+在指定 target 上等待 DOM 中指定 CSS 选择器的元素出现。
+
+```
+cdp-server browser waitfor-target {targetId} ".item" 5000
+```
+
+✅ 找到时输出：
+```
+FOUND: .item
+```
+
+超时时输出（非错误）：
+```
+TIMEOUT: .item
+```
+
+#### 并发工作流示例
+
+```bash
+# 1. 为每个 Worker 创建独立标签页，保存各自的 targetId
+T1=$(cdp-server browser new-tab "about:blank" | sed 's/NEW-TAB: //')
+T2=$(cdp-server browser new-tab "about:blank" | sed 's/NEW-TAB: //')
+
+# 2. 各 target 独立导航（真正并行，互不干扰）
+cdp-server browser goto-target "$T1" "https://www.example.com/page1"
+cdp-server browser goto-target "$T2" "https://www.example.com/page2"
+
+# 3. 各 target 独立执行 JS
+cdp-server browser eval-target "$T1" "document.title"
+cdp-server browser eval-target "$T2" "document.title"
+```
+
+---
+
 ### iframe 操作（`frame` 子命令）
 
 在 iframe 中执行操作。自动判断同域/跨域（OOPIF）iframe，对用户透明。
