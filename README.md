@@ -6,15 +6,20 @@
 
 区别于 Puppeteer/Playwright 等 headless 方案，它在用户当前 Chrome 窗口中执行操作，**复用已有登录态，绕过反爬检测**，对目标网站完全不可见。
 
-**零 npm 依赖**，核心为 **Go 单二进制** + Chrome 扩展，npm 包仅用于分发和自动下载。
+**零依赖**，核心为 **Go 单二进制** + Chrome 扩展，通过 GitHub Release 分发。
 
 ## 安装
 
-```bash
-npm install -g cdp-server
-```
+从 [GitHub Releases](https://github.com/bannermiao/cdp-autorunner/releases) 下载对应平台二进制：
 
-安装后自动下载当前平台二进制到 `scripts/` 目录。
+| 平台 | 文件 |
+| --- | --- |
+| Windows x64 | `cdp-server-win-x64.exe` |
+| Linux amd64 | `cdp-server-linux-amd64.gz` |
+| macOS amd64 | `cdp-server-darwin-amd64.gz` |
+| macOS arm64 | `cdp-server-darwin-arm64.gz` |
+
+将二进制放入 `scripts/` 目录：Windows 直接使用 `cdp-server.exe`；Linux/macOS 解压后重命名为 `cdp-server` 并赋予执行权限。
 
 ## 使用
 
@@ -41,23 +46,23 @@ cdp-server stop
 
 ## 示例
 
-通过 `npx` 可直接运行内置的示例脚本（需已启动 daemon 及扩展）：
+可直接运行内置的示例脚本（需已启动 daemon 及扩展）：
 
 ```bash
 # Google 搜索 — 搜索关键词并提取结果
-npx google-search "关键词"
+node cdp-autorunner-skill/scripts/google/google-search.js "关键词"
 
 # 淘宝购物车 — 提取购物车商品信息
-npx taobao-cart
+node cdp-autorunner-skill/scripts/taobao/taobao-cart.js
 
 # 淘宝搜索 — 搜索商品列表并提取数据
-npx taobao-search "商品名"
+node cdp-autorunner-skill/scripts/taobao/taobao-search.js "商品名"
 
 # DeepSeek 余额 — 查询 DeepSeek 账户余额
-npx deepseek-balance
+node cdp-autorunner-skill/scripts/deepseek/deepseek-balance.js
 
 # eBay 调研 — 搜索产品并生成可视化报表
-npx ebay-research "产品名"
+node cdp-autorunner-skill/scripts/ebay/ebay-research.js "产品名"
 ```
 
 ## 项目结构
@@ -72,7 +77,6 @@ cdp-server/
 │   ├── manifest.json     ┃   通过 chrome.debugger API 控制标签页
 │   ├── background.js     ┃   WebSocket 服务端（ws://127.0.0.1:18765）
 │   └── popup.html/js     ┃   弹出面板 UI
-├── bin/cdp-server.js     ← npm CLI 入口，查找并调用 Go 二进制
-├── postinstall.js        ← npm postinstall 钩子，自动下载二进制
-└── package.json          ← npm 包定义
+├── scripts/              ← 二进制放置目录（从 GitHub Release 下载）
+└── cdp-autorunner-skill/ ← 示例脚本与 Skill 文档
 ```

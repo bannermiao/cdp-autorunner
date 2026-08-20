@@ -48,7 +48,8 @@ cdp-server browser goto/eval/click... ──WS──→ CDP Bridge 扩展 ──
 └── scripts/
     ├── cdp-server (或 cdp-server.exe) ← Go 单二进制（需下载，见 I-0）
     ├── ebay/                         ← eBay 调研脚本
-    │   └── ebay-research.js          ← 搜索提取 + 可视化报表
+    │   ├── ebay-research.js          ← 搜索提取 + 可视化报表（支持并发）
+    │   └── ebay-research-worker.js   ← 并发子进程（由主脚本 fork）
     ├── google/                       ← Google 搜索脚本
     │   └── google-search.js          ← 搜索提取
     ├── deepseek/                     ← DeepSeek 平台脚本
@@ -90,7 +91,7 @@ else
 fi
 
 # 下载
-VERSION="v1.1.0"
+VERSION="v1.2.0"
 curl -L -o "$BIN.gz" "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/$FILE"
 
 # 解压（zip 格式的 .exe 不需要解压）
@@ -105,7 +106,7 @@ echo "下载完成: $BIN"
 PowerShell（Windows）下：
 ```powershell
 cd {skill_path}/scripts
-$VERSION = "v1.1.0"
+$VERSION = "v1.2.0"
 Invoke-WebRequest -Uri "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/cdp-server-win-x64.exe" -OutFile "cdp-server.exe"
 Write-Host "下载完成"
 ```
