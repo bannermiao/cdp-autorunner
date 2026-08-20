@@ -1,6 +1,6 @@
 {
   "name": "cdp-server",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "通过 Chrome 扩展控制真实浏览器的自动化 CLI 工具",
   "bin": {
     "cdp-server": "bin/cdp-server.js"

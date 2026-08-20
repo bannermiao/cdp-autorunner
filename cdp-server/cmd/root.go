@@ -48,7 +48,7 @@ func init() {
 		Use:   "version",
 		Short: "版本信息",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("cdp-server v1.1.0")
+			fmt.Println("cdp-server v1.2.0")
 		},
 	})
 }
