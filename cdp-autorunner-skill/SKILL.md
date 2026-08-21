@@ -49,7 +49,8 @@ cdp-server browser goto/eval/click... ──WS──→ CDP Bridge 扩展 ──
     ├── cdp-server (或 cdp-server.exe) ← Go 单二进制（需下载，见 I-0）
     ├── ebay/                         ← eBay 调研脚本
     │   ├── ebay-research.js          ← 搜索提取 + 可视化报表（支持并发）
-    │   └── ebay-research-worker.js   ← 并发子进程（由主脚本 fork）
+    │   ├── ebay-research-worker.js   ← 并发子进程（由主脚本 fork）
+    │   └── ebay-report.js            ← 独立报表生成
     ├── google/                       ← Google 搜索脚本
     │   └── google-search.js          ← 搜索提取
     ├── deepseek/                     ← DeepSeek 平台脚本
@@ -179,7 +180,7 @@ cd {cwd}
 | `scroll <px>` | 滚动（正数向下） | `scroll 500` |
 | `new-tab [url]` | 新建标签页（返回 targetId） | `new-tab "https://..."` |
 | `switch-tab <n>` | 切换标签页（从0开始） | `switch-tab 0` |
-| `close-tab` | 关闭当前标签页 | `close-tab` |
+| `close-tab [targetId]` | 关闭标签页（可指定 targetId 精确关闭，并发安全） | `close-tab $TID` |
 
 #### 多 target 并发操作
 | 命令 | 说明 | 示例 |
@@ -202,6 +203,10 @@ T2=$("{skill_path}/scripts/cdp-server" browser new-tab "about:blank" | sed 's/NE
 "{skill_path}/scripts/cdp-server" browser goto-target "$T2" "https://example.com/page2"
 "{skill_path}/scripts/cdp-server" browser eval-target "$T1" "document.title"
 "{skill_path}/scripts/cdp-server" browser eval-target "$T2" "document.title"
+
+# 3. 结束后按 targetId 精确关闭各标签页（并发安全，不误关其他并发单元的标签页）
+"{skill_path}/scripts/cdp-server" browser close-tab "$T1"
+"{skill_path}/scripts/cdp-server" browser close-tab "$T2"
 ```
 
 #### 元素查询
@@ -270,6 +275,9 @@ node {skill_path}/scripts/ebay/ebay-research.js "headlight" --report
 
 # 已有 JSON 数据生成报表
 node {skill_path}/scripts/ebay/ebay-research.js data.json
+
+# 独立报表生成脚本（卖家与好评率拆分为独立两列，好评率列可排序）
+node {skill_path}/scripts/ebay/ebay-report.js data.json [output.html]
 ```
 
 **并发模式**：脚本支持多 Worker 并发，每个 Worker 通过 `new-tab` 创建独立 target，用 `goto-target` / `eval-target` / `waitfor-target` 操作自己的标签页，真正并行抓取、互不干扰：
@@ -476,6 +484,47 @@ node {skill_path}/scripts/taobao/taobao-search.js "DDR5 内存 16G" results.json
 4. **cdp-server 是 Go 单二进制**：无需 Node.js 即可运行 daemon；ebay-research.js 等 Node 业务脚本按需使用
 5. **eval 返回对象数组时必须用 `JSON.stringify()` 包裹**，Chrome 扩展不支持直接序列化
 6. **业务脚本（如 ebay/ 下的脚本）放在 `scripts/<业务名>/` 目录**，便于多业务扩展
+
+## 多进程与批量关闭
+
+本工具存在 **两层独立进程**，关闭时需注意二者的边界，避免残留：
+
+### 第一层：cdp-server daemon（单实例）
+
+- 由 `cdp-server start` 启动，是唯一的常驻后台服务，`stop` / `restart` 只作用于它。
+- daemon 把自身 PID 写入二进制同目录的 `scripts/.cdp-server.pid`（已被 `.gitignore` 忽略）。
+- `stop` 流程：先向 `http://127.0.0.1:18765/shutdown` 发优雅关闭请求，再 `SIGTERM` 该 PID，最后清理 pid 文件。
+- ⚠️ 若 pid 文件缺失或被手动删除，`stop` 会提示「daemon 未在运行」且**无法**据此杀掉仍在跑的进程，需手动结束（见下）。
+
+### 第二层：业务脚本的并发 Worker 子进程 + Chrome 标签页
+
+- 并发模式下（如 `ebay-research.js --concurrency N`），主脚本通过 `child_process.fork()` 拉起 N 个独立 Node Worker 进程；每个 Worker 再 `new-tab` 开一个专属 Chrome 标签页。
+- **这些 Worker 进程和标签页不被 daemon 的 `stop` 回收**：`stop` 只关 daemon，残留的 Worker 仍会尝试连已关闭的 daemon 而报错，标签页也残留在 Chrome 中。
+- 正常结束后，Worker 由主脚本通过 IPC 发送 `exit` 消息有序退出并关闭各自标签页，无需手动干预。
+- 异常中断（Ctrl+C、进程被强杀、daemon 被先 `stop`）时，可能残留 Worker 进程与标签页，需手动清理。
+
+### 手动批量关闭（兜底）
+
+```bash
+# 1. 停止 daemon（常规）
+"{skill_path}/scripts/cdp-server" stop
+
+# 2. 清理残留的 Node Worker 进程（并发脚本意外中断时）
+#    Windows:
+taskkill /F /IM node.exe
+#    或精确定位带 cdp 参数的 node 进程：
+Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -like '*ebay-research*' } | ForEach-Object { taskkill /PID $_.ProcessId /F }
+
+# 3. 若 daemon 仍在运行但 pid 文件丢失，强制结束：
+#    Windows:
+taskkill /F /IM cdp-server.exe
+#    macOS/Linux:
+pkill -f cdp-server
+
+# 4. Chrome 中残留的标签页：手动在浏览器关闭即可（扩展会随 daemon 断开自动离线）
+```
+
+> **教训**：先 `stop` daemon 再中断业务脚本，会导致 Worker 拿不到 daemon 而全部报错。正确顺序是先让业务脚本自然结束（或 Ctrl+C 等待 Worker 退出），再 `stop` daemon。
 
 ---
 

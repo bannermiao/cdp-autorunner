@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | CLI 版本号 | `cdp-server/cmd/root.go`（`version` 命令输出） | `cdp-server v1.2.0` |
 | 扩展版本号 | `cdp-extension/manifest.json`（`version` 字段） | `"version": "2.2.0"` |
+| 扩展页面显示版本号 | `cdp-extension/popup.html`（`brand-ver`） | `v2.2.0 · Developer Tool` |
 | skill 下载版本号（bash） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `VERSION="v1.2.0"` |
 | skill 下载版本号（PowerShell） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `$VERSION = "v1.2.0"` |
 | skill version 输出示例 | `cdp-autorunner-skill/references/cdp-server-cli.md` | `cdp-server v1.2.0` |
@@ -24,13 +25,21 @@
 fmt.Println("cdp-server vX.Y.Z")
 ```
 
-### 步骤 2：修改扩展版本号
+### 步骤 2：修改扩展版本号（2 处）
 
-`cdp-extension/manifest.json`：
+- `cdp-extension/manifest.json`：
 
 ```json
 "version": "X.Y.Z"
 ```
+
+- `cdp-extension/popup.html`（页面右上角显示，格式 `vX.Y.Z · Developer Tool`）：
+
+```html
+<span class="brand-ver">vX.Y.Z · Developer Tool</span>
+```
+
+> 注意：两处必须一致，否则扩展页面显示的版本号与实际不符。
 
 ### 步骤 3：修改 skill 下载版本号（3 处）
 

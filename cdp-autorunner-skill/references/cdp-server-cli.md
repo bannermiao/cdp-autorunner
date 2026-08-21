@@ -400,15 +400,24 @@ cdp-server browser switch-tab 1
 SWITCH-TAB: ok
 ```
 
-#### `close-tab`
+#### `close-tab [targetId]`
 
-关闭当前活动的标签页。
+关闭标签页。不指定参数时关闭当前活动标签页（兼容旧行为）；指定 `targetId` 时按 targetId 精确关闭，**并发安全**——扩展端通过 `chrome.debugger.getTargets()` 反查 tabId 后关闭，不会误关其他并发单元的活动标签页。
 
 ```
+# 关闭当前活动标签页（旧行为）
 cdp-server browser close-tab
+
+# 按 targetId 精确关闭（并发清理，推荐）
+cdp-server browser close-tab {targetId}
 ```
 
-✅ 输出：
+✅ 输出（指定 targetId 时）：
+```
+CLOSE-TAB: {targetId}
+```
+
+✅ 输出（未指定参数时）：
 ```
 CLOSE-TAB: ok
 ```
@@ -477,6 +486,10 @@ cdp-server browser goto-target "$T2" "https://www.example.com/page2"
 # 3. 各 target 独立执行 JS
 cdp-server browser eval-target "$T1" "document.title"
 cdp-server browser eval-target "$T2" "document.title"
+
+# 4. 结束后按 targetId 精确关闭各标签页（并发安全，不误关其他 Worker 的标签页）
+cdp-server browser close-tab "$T1"
+cdp-server browser close-tab "$T2"
 ```
 
 ---
