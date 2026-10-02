@@ -92,7 +92,7 @@ else
 fi
 
 # 下载
-VERSION="v1.3.0"
+VERSION="v1.3.1"
 curl -L -o "$BIN.gz" "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/$FILE"
 
 # 解压（zip 格式的 .exe 不需要解压）
@@ -107,7 +107,7 @@ echo "下载完成: $BIN"
 PowerShell（Windows）下：
 ```powershell
 cd {skill_path}/scripts
-$VERSION = "v1.3.0"
+$VERSION = "v1.3.1"
 Invoke-WebRequest -Uri "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/cdp-server-win-x64.exe" -OutFile "cdp-server.exe"
 Write-Host "下载完成"
 ```
@@ -471,15 +471,43 @@ node {skill_path}/scripts/taobao/taobao-search.js "DDR5 内存 16G" results.json
 |:-----|:-----|:-----|
 | 连接 daemon 失败 | daemon 未启动 | `"{skill_path}/scripts/cdp-server" start` |
 | 扩展未连接 | 扩展未加载或 SW 休眠 | 检查 chrome://extensions 中扩展状态 |
-| 命令超时 | 页面加载慢或无响应 | 增加 wait / waitfor 时间 |
+| **命令超时（先查这条）** | **① 扩展未连接（最常见）② 页面真的慢** | **先探扩展在线，再看是不是页面慢** |
 | 返回结果为空 | 选择器不匹配 | 用 text / html / css 命令调试 |
+
+### ⚠️ `命令超时` 的真实含义
+
+**v1.3.1 起已修复**：旧版本（≤ v1.3.0 CLI / ≤ 2.3.0 扩展）在扩展未连接时，daemon 回的错误没带 `id`，客户端按 id 匹配不到就丢弃，于是**静默挂满整个超时**再报 `命令超时 (Xs)` —— 看起来像页面慢，其实是扩展没连上。
+
+已实测复现（旧版本）：`start` 起 daemon 后立刻 `browser eval "1+1"` → `ERROR: 命令超时 (30s)`，实际耗时 **30449 ms**。
+
+**所以看到 `命令超时` 的第一反应不是「加大 wait」，而是先探一下扩展在不在线：**
+
+```bash
+"{skill_path}/scripts/cdp-server" browser new-tab "about:blank"   # 秒回 = 扩展在线；超时 = 扩展没连上
+```
+
+### 超时值不是统一的 30s，每条命令不一样
+
+`defaultTimeout = 30s` 只是兜底，实际超时由各命令自传：
+
+| 超时 | 命令 |
+|--:|:--|
+| 30s | `eval` · `exec` · `goto-target` · `eval-target` |
+| 15s | `new-tab` · `close-tab` |
+| 10s | `click` · `fill` · `text` · `html` · `attr` · `count` |
+| 5s | `scroll` · `hover` |
+| `timeoutMs+2s` | `waitfor` · `waitfor-target`（默认 12s） |
+
+**别按单一数字设计重试逻辑。** 命令超时被 kill 的是 cdp-server 子进程，**扩展端不受影响**——所以超时后页面上的操作可能还在跑，重试前先 `wait` 一下。
 
 ---
 
 ## 注意事项
 
 1. **daemon 保持后台运行**：`cdp-server start` 后守护进程方式运行，关闭终端不影响
-2. **扩展自动连接**：扩展会定期探测 daemon，在线后自动连接
+   - ⚠️ **例外**：在 agent 沙箱（Windows Job Object，`KILL_ON_JOB_CLOSE`）里，`DETACHED_PROCESS` **逃不出 Job Object**，工具调用一结束 daemon 就没了。这种情况要把 `cdp-server daemon` 作为**长驻后台任务**启动，或改用计划任务/服务托管。
+2. **扩展自动连接**：扩展靠 `chrome.alarms` 定期探测 daemon，在线后自动连接（v2.3.1 起，任意 tab 事件也会触发一次探测，重连更快）。
+   - ⚠️ **重连时延仍不确定**。**daemon 刚起就发命令可能撞上超时** —— 起完 daemon 要先探一次（见「错误处理」），探通了再干活；没探通就每 3s 重探、最多等 60~150s。
 3. **登录态复用**：操作的是当前真实 Chrome 窗口，目标网站的登录态自动可用
 4. **cdp-server 是 Go 单二进制**：无需 Node.js 即可运行 daemon；ebay-research.js 等 Node 业务脚本按需使用
 5. **eval 返回对象数组时必须用 `JSON.stringify()` 包裹**，Chrome 扩展不支持直接序列化

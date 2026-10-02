@@ -89,7 +89,7 @@ cdp-server version
 
 ✅ 输出示例：
 ```
-cdp-server v1.3.0
+cdp-server v1.3.1
 ```
 
 ---
@@ -635,7 +635,33 @@ cdp-server browser close-tab
 |:-----|:-----|:---------|
 | `ERROR: 连接 daemon 失败` | daemon 未运行 | `cdp-server start` |
 | `ERROR: 扩展未连接` | Chrome 扩展未加载或 SW 休眠 | 检查 chrome://extensions |
-| `ERROR: 命令超时 (30s)` | 页面加载慢或无响应 | 检查网络，或增加 wait 时间 |
+| `ERROR: 命令超时 (Xs)` | **① 扩展未连接（最常见，见下）② 页面真的慢** | **先探扩展在线，再考虑加 wait** |
 | 返回空结果 | CSS 选择器不匹配 | 确认页面 DOM 结构 |
+
+### ⚠️ 「命令超时」的真实含义
+
+**v1.3.1 起已修复。** 旧版本在扩展未连接时，daemon 回的错误没带 `id`，客户端按 id 匹配不到就丢弃 → **静默挂满整个超时**再报 `命令超时 (Xs)`，看起来像页面慢，其实是扩展没连上。
+
+实测复现（旧版本）：`start` 起 daemon 后立刻 `browser eval "1+1"` → `ERROR: 命令超时 (30s)`，**实际耗时 30449 ms**。
+
+先探扩展在不在线：
+
+```bash
+cdp-server browser new-tab "about:blank"   # 秒回 = 在线；超时 = 没连上
+```
+
+### 超时值不是统一的 30s
+
+`defaultTimeout = 30s` 只是兜底，实际每条命令自己传：
+
+| 超时 | 命令 |
+|--:|:--|
+| 30s | `eval` · `exec` · `goto-target` · `eval-target` |
+| 15s | `new-tab` · `close-tab` |
+| 10s | `click` · `fill` · `text` · `html` · `attr` · `count` |
+| 5s | `scroll` · `hover` |
+| `timeoutMs+2s` | `waitfor` · `waitfor-target`（默认 12s） |
+
+命令超时被 kill 的是 cdp-server 子进程，**扩展端不受影响** —— 页面上的操作可能还在跑，重试前先 `wait` 一下。
 
 
