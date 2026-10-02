@@ -126,7 +126,13 @@ async function execOnTarget(targetId, code) {
     await chrome.debugger.detach({ targetId });
     if (r.exceptionDetails) return { ok: false, error: r.exceptionDetails.exception?.description || 'Runtime.evaluate error' };
     return { ok: true, data: r.result.value };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) {
+    // 失败也要 detach：页面在 evaluate 期间导航会被 Chrome 强制 detach（报
+    // "Detached while handling command"），此时若不清理会在浏览器顶部留下
+    // 「正在调试此浏览器」横幅，下次 attach 还要多走一轮 already-attached 恢复。
+    try { await chrome.debugger.detach({ targetId }); } catch (_) {}
+    return { ok: false, error: e.message };
+  }
 }
 
 // 在指定 targetId 上执行 CDP 命令（attach → 命令 → detach），支持并发
@@ -136,7 +142,10 @@ async function cdpOnTarget(targetId, method, params) {
     const r = await chrome.debugger.sendCommand({ targetId }, method, params || {});
     await chrome.debugger.detach({ targetId });
     return { ok: true, data: r };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) {
+    try { await chrome.debugger.detach({ targetId }); } catch (_) {}
+    return { ok: false, error: e.message };
+  }
 }
 
 async function handleBatch(batch, tabId) {
@@ -305,9 +314,13 @@ async function sendTabsUpdate() {
   const tabs = (await chrome.tabs.query({})).filter(t => isScriptable(t.url));
   wsSend(JSON.stringify({ type: 'tabs_update', tabs: tabs.map(t => ({ id: t.id, url: t.url, title: t.title })) }));
 }
-chrome.tabs.onUpdated.addListener((_, changeInfo) => { if (changeInfo.status === 'complete') sendTabsUpdate(); });
-chrome.tabs.onRemoved.addListener(() => sendTabsUpdate());
-chrome.tabs.onCreated.addListener(() => sendTabsUpdate());
+// 断线时顺手重连：只靠 chrome.alarms 单点探测的话，重连时延没有下限
+// （alarms 有最小间隔限制，且 SW 休眠后还要加一次唤醒延迟）。浏览器只要有活动
+// 就会触发这些回调，顺带 probeAndConnect() 能把「daemon 刚起、扩展还没连上」
+// 这个窗口从数十秒压到一次事件的时间。probeAndConnect 内部已判 isConnected，开销可忽略。
+chrome.tabs.onUpdated.addListener((_, changeInfo) => { if (!isConnected()) probeAndConnect(); if (changeInfo.status === 'complete') sendTabsUpdate(); });
+chrome.tabs.onRemoved.addListener(() => { if (!isConnected()) probeAndConnect(); sendTabsUpdate(); });
+chrome.tabs.onCreated.addListener(() => { if (!isConnected()) probeAndConnect(); sendTabsUpdate(); });
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'popup') {

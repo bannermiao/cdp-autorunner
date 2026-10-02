@@ -60,14 +60,20 @@ func send(payload interface{}, timeout time.Duration) (interface{}, error) {
 				continue
 			}
 
-			if resp.ID != id {
-				continue
-			}
 			if resp.Type == "ack" {
 				continue
 			}
+			// daemon 的全局错误（如"扩展未连接"）可能不带 id —— 不能因为 id 匹配不上就丢掉，
+			// 否则调用方只能干等到超时。先于 id 过滤处理，兼容旧版 daemon。
+			if resp.ID == "" && resp.Type == "error" {
+				errCh <- fmt.Errorf(fmt.Sprint(resp.Error))
+				return
+			}
+			if resp.ID != id {
+				continue
+			}
 			if resp.Type == "error" {
-				// daemon 直接返回的错误（如"扩展未连接"）
+				// daemon 按 id 返回的错误
 				errMsg := fmt.Sprint(resp.Error)
 				errCh <- fmt.Errorf(errMsg)
 				return

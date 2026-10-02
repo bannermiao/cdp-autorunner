@@ -91,7 +91,10 @@ func RunDaemon(port int) {
 				if extSocket != nil {
 					extSocket.WriteMessage(websocket.TextMessage, msg)
 				} else {
+					// 必须回带 id：客户端按 id 匹配响应，不回 id 的话这条错误会被丢弃，
+					// 调用方只能干等到 timeout，最后报一个误导性的「命令超时」。
 					conn.WriteJSON(map[string]interface{}{
+						"id":    parsed.ID,
 						"type":  "error",
 						"error": "扩展未连接",
 					})
