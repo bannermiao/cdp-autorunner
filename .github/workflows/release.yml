@@ -28,11 +28,19 @@ jobs:
           gzip -c cdp-server-darwin-amd64 > cdp-server-darwin-amd64.gz
           ls -lh
 
+      - name: Package browser extension
+        run: |
+          # 打成 cdp-extension.zip：解压后是一个 cdp-extension/ 目录，直接「加载已解压的扩展程序」用
+          # 排除 STORE_LISTING.md（上架说明，运行时不需要）
+          rm -f cdp-extension.zip
+          zip -r cdp-extension.zip cdp-extension -x 'cdp-extension/STORE_LISTING.md'
+          unzip -l cdp-extension.zip
+
       - name: Upload binaries to Release
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
-          artifacts: "cdp-server/cdp-server-*"
+          artifacts: "cdp-server/cdp-server-*, cdp-extension.zip"
           token: ${{ github.token }}
           generateReleaseNotes: true
           allowUpdates: true
