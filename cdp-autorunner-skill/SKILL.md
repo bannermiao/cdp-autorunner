@@ -92,7 +92,7 @@ else
 fi
 
 # 下载
-VERSION="v1.3.1"
+VERSION="v1.4.0"
 curl -L -o "$BIN.gz" "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/$FILE"
 
 # 解压（zip 格式的 .exe 不需要解压）
@@ -107,7 +107,7 @@ echo "下载完成: $BIN"
 PowerShell（Windows）下：
 ```powershell
 cd {skill_path}/scripts
-$VERSION = "v1.3.1"
+$VERSION = "v1.4.0"
 Invoke-WebRequest -Uri "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/cdp-server-win-x64.exe" -OutFile "cdp-server.exe"
 Write-Host "下载完成"
 ```
@@ -621,7 +621,7 @@ txt.match(/¥([\d,.]+)/)  // 正确提取 125.92
 | 页面内等待元素渲染 | `waitfor` | MutationObserver 监听 DOM，推荐 |
 | 页面导航到新 URL | `location.href` 轮询 | `waitfor` 的 observer 会随旧页面销毁 |
 | 固定等待 | `wait` | 简单粗暴，SPA 首屏渲染可用 |
-| 等网络请求完成 | `wait-response` | 监听 Network.responseReceived |
+| 等网络请求完成 | `wait-response` | 只认调用时刻起发出的请求 |
 
 **经验值**：淘宝搜索页 `goto` 后等 4000ms，Google 搜索 `form.submit()` 后等 1500ms。
 

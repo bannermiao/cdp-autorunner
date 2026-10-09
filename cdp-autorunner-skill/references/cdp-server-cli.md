@@ -89,7 +89,7 @@ cdp-server version
 
 ✅ 输出示例：
 ```
-cdp-server v1.3.1
+cdp-server v1.4.0
 ```
 
 ---
@@ -202,7 +202,7 @@ TIMEOUT: .item
 
 #### `wait-response <pattern> [超时ms]`
 
-等待匹配 URL 模式的网络请求完成。通过 Chrome debugger 的 `Network.responseReceived` 事件实现。
+等待匹配 URL 模式的网络请求完成，返回该请求的 URL。只从调用时刻开始监听，此前已完成的请求不补；请求加载失败按错误返回。
 
 ```
 cdp-server browser wait-response "api.example.com/data" 15000
