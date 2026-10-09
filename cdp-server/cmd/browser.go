@@ -499,10 +499,15 @@ func registerAllBrowserCommands() {
 					timeoutMs = t
 				}
 			}
-			code := fmt.Sprintf(`(async()=>{return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('timeout')),%d);chrome.debugger.onEvent.addListener(function listener(src,method,params){if(method==='Network.responseReceived'&&params.response.url.includes('%s')){clearTimeout(timer);chrome.debugger.onEvent.removeListener(listener);resolve(params.response.url)}});})})()`, timeoutMs, pattern)
-			result, err := ws.SendEval(code, time.Duration(timeoutMs+5000)*time.Millisecond)
+			result, err := ws.SendExt("waitResponse", map[string]interface{}{
+				"pattern":   pattern,
+				"timeoutMs": timeoutMs,
+			}, time.Duration(timeoutMs+5000)*time.Millisecond)
 			if err != nil {
-				return nil, fmt.Errorf("wait-response 超时 (%s)", pattern)
+				if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "命令超时") {
+					return nil, fmt.Errorf("wait-response 超时 (%s)", pattern)
+				}
+				return nil, err
 			}
 			return "RESPONSE: " + fmt.Sprint(result), nil
 		},

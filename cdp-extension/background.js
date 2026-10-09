@@ -189,6 +189,60 @@ async function handleMessage(data) {
   return { ok: false, error: 'invalid format' };
 }
 
+// ---- 等待网络响应 ----
+// Network 域必须显式 enable 后才推送 Network.* 事件。用引用计数 + 串行链
+// 保证并发 wait-response 的 enable/disable 不互相穿插。
+const netState = { tabId: null, count: 0 };
+let netChain = Promise.resolve();
+function netOp(fn) {
+  const p = netChain.then(fn, fn);
+  netChain = p.catch(() => {});
+  return p;
+}
+
+// 等待匹配 URL 的请求加载完成，返回该 URL；超时或请求失败时抛错
+async function waitForResponse(tabId, pattern, timeoutMs) {
+  await ensureAttached(tabId);
+  return netOp(async () => {
+    if (netState.tabId !== tabId) { netState.tabId = tabId; netState.count = 0; }
+    if (netState.count === 0) await chrome.debugger.sendCommand({ tabId }, 'Network.enable', {});
+    netState.count++;
+    try {
+      return await new Promise((resolve, reject) => {
+        const pending = new Map(); // requestId -> url
+        let settled = false, timer = null;
+        const finish = (err, url) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          chrome.debugger.onEvent.removeListener(listener);
+          if (err) reject(new Error(err)); else resolve(url);
+        };
+        const listener = (src, method, params) => {
+          if (src.tabId !== tabId) return;
+          if (method === 'Network.requestWillBeSent') {
+            if (params.request && String(params.request.url).indexOf(pattern) >= 0) {
+              pending.set(params.requestId, params.request.url);
+            }
+          } else if (method === 'Network.loadingFinished') {
+            if (pending.has(params.requestId)) finish(null, pending.get(params.requestId));
+          } else if (method === 'Network.loadingFailed') {
+            if (pending.has(params.requestId)) finish('请求失败: ' + pending.get(params.requestId));
+          }
+        };
+        timer = setTimeout(() => finish('timeout'), timeoutMs);
+        chrome.debugger.onEvent.addListener(listener);
+      });
+    } finally {
+      netState.count--;
+      if (netState.count === 0) {
+        netState.tabId = null;
+        try { await chrome.debugger.sendCommand({ tabId }, 'Network.disable', {}); } catch (_) {}
+      }
+    }
+  });
+}
+
 // ---- 扩展上下文命令（可调用 chrome.debugger / chrome.tabs 等扩展 API）----
 
 async function handleExt(c) {
@@ -258,6 +312,23 @@ async function handleExt(c) {
       const r = await chrome.debugger.sendCommand({ targetId }, method, params);
       await chrome.debugger.detach({ targetId });
       return { ok: true, data: r };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
+
+  // 等待匹配 URL 的网络请求加载完成（attach → Network.enable → 监听 → 完成/超时）
+  if (action === 'waitResponse') {
+    try {
+      let tabId = c.tabId;
+      if (tabId == null && c.targetId) {
+        const targets = await chrome.debugger.getTargets();
+        const t = targets.find(x => x.id === c.targetId);
+        if (t) tabId = t.tabId;
+      }
+      if (tabId == null) tabId = sharedTab;
+      if (tabId == null) tabId = await ensureTab();
+      const timeoutMs = c.timeoutMs > 0 ? c.timeoutMs : 15000;
+      const url = await waitForResponse(tabId, String(c.pattern || ''), timeoutMs);
+      return { ok: true, data: url };
     } catch (e) { return { ok: false, error: e.message }; }
   }
 
