@@ -23,7 +23,7 @@ cdp-server browser [子命令] [参数...]
 | `stop` | 先请求 `http://127.0.0.1:18765/shutdown` 优雅关闭，再 SIGTERM pid 文件里的进程 |
 | `restart` | stop + start |
 | `daemon` | 内部命令，前台跑 WS 服务端（沙箱环境需要长驻时手动用） |
-| `version` | `cdp-server v1.4.0` |
+| `version` | `cdp-server v1.4.2` |
 
 PID 文件在二进制同目录的 `.cdp-server.pid`。pid 文件丢了 `stop` 就杀不掉还在跑的进程，需手动结束。
 

@@ -113,7 +113,7 @@ ebay-research.js ──spawn──→ cdp-server CLI ──WS(127.0.0.1:18765)�
 
 ```bash
 cd "{skill_path}/scripts"
-VERSION="v1.4.0"                     # 与 cdp-server release 保持一致
+VERSION="v1.4.2"                     # 与 cdp-server release 保持一致
 
 case "$OSTYPE" in
   msys*|cygwin*|win32*)  ASSET="cdp-server-win-x64.exe";  BIN="cdp-server.exe" ;;
@@ -134,11 +134,11 @@ ls -la "$BIN"
 PowerShell（Windows）：
 ```powershell
 cd "{skill_path}\scripts"
-$VERSION = "v1.4.0"
+$VERSION = "v1.4.2"
 Invoke-WebRequest -Uri "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/cdp-server-win-x64.exe" -OutFile "cdp-server.exe"
 ```
 
-✅ 验证：`"{skill_path}/scripts/cdp-server.exe" version`（macOS/Linux 去掉 `.exe`）输出 `cdp-server v1.4.0`。
+✅ 验证：`"{skill_path}/scripts/cdp-server.exe" version`（macOS/Linux 去掉 `.exe`）输出 `cdp-server v1.4.2`。
 ❌ 失败 → 检查网络；代理机器注意 `curl` 是否走到了系统代理；也可手动从 [Releases](https://github.com/bannermiao/cdp-autorunner/releases) 下载对应资产放进 `scripts/`。
 
 ### [ ] I-1 启动 daemon

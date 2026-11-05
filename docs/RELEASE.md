@@ -6,24 +6,33 @@
 
 | 位置 | 文件 | 示例 |
 | --- | --- | --- |
-| CLI 版本号 | `cdp-server/cmd/root.go`（`version` 命令输出） | `cdp-server v1.2.0` |
+| CLI 版本号 | **不再手改**：构建时由 git tag 注入（`-X cdp-server/cmd.version`），源码里是 `var version = "dev"` | `cdp-server v1.4.2` |
 | 扩展版本号 | `cdp-extension/manifest.json`（`version` 字段） | `"version": "2.2.0"` |
 | 扩展页面显示版本号 | `cdp-extension/popup.html`（`brand-ver`） | `v2.2.0 · Developer Tool` |
-| skill 下载版本号（bash） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `VERSION="v1.2.0"` |
-| skill 下载版本号（PowerShell） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `$VERSION = "v1.2.0"` |
-| skill version 输出示例 | `cdp-autorunner-skill/references/cdp-server-cli.md` | `cdp-server v1.2.0` |
+| skill 下载版本号（bash） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `VERSION="v1.4.2"` |
+| skill 下载版本号（PowerShell） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `$VERSION = "v1.4.2"` |
+| skill version 输出示例 | `cdp-autorunner-skill/references/cdp-server-cli.md` | `cdp-server v1.4.2` |
 
 > 注：CLI 与扩展版本号独立，不必一致（如 CLI v1.2.0 / 扩展 2.2.0）。
 
 ## 二、更新步骤
 
-### 步骤 1：修改 CLI 版本号
+### 步骤 1：CLI 版本号（无需手改）
 
-`cdp-server/cmd/root.go`：
+版本号在构建时由 tag 注入，源码里只有默认值：
 
 ```go
-fmt.Println("cdp-server vX.Y.Z")
+// cdp-server/cmd/root.go
+var version = "dev"
 ```
+
+`release.yml` 里：
+
+```yaml
+LDFLAGS="-X cdp-server/cmd.version=${{ github.ref_name }}"
+```
+
+所以你只需要打 tag，`--version` 自动等于 tag 名。本地 `go build` 不带 ldflags 时输出 `cdp-server dev`。
 
 ### 步骤 2：修改扩展版本号（2 处）
 

@@ -19,10 +19,12 @@ jobs:
       - name: Cross-compile all platforms
         run: |
           cd cdp-server
-          GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -o cdp-server-linux-amd64     .
-          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -o cdp-server-darwin-arm64    .
-          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -o cdp-server-darwin-amd64    .
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o cdp-server-win-x64.exe     .
+          # 版本号由 tag 注入，避免 root.go 里写死导致 --version 与实际 tag 不一致
+          LDFLAGS="-X cdp-server/cmd.version=${{ github.ref_name }}"
+          GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o cdp-server-linux-amd64     .
+          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o cdp-server-darwin-arm64    .
+          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o cdp-server-darwin-amd64    .
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o cdp-server-win-x64.exe     .
           gzip -c cdp-server-linux-amd64  > cdp-server-linux-amd64.gz
           gzip -c cdp-server-darwin-arm64 > cdp-server-darwin-arm64.gz
           gzip -c cdp-server-darwin-amd64 > cdp-server-darwin-amd64.gz

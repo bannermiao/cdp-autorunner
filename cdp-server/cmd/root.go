@@ -9,6 +9,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version 由构建时注入：-ldflags "-X cdp-server/cmd.version=<tag>"；本地构建显示 dev。
+var version = "dev"
+
 var rootCmd = &cobra.Command{
 	Use:   "cdp-server",
 	Short: "CDP Bridge — 浏览器自动化 CLI",
@@ -48,7 +51,7 @@ func init() {
 		Use:   "version",
 		Short: "版本信息",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("cdp-server v1.4.0")
+			fmt.Println("cdp-server " + version)
 		},
 	})
 }
