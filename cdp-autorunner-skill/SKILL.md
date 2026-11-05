@@ -44,7 +44,7 @@ allowed-tools:
     ├── deepseek/                     ← DeepSeek 平台脚本
     │   └── deepseek-balance.js       ← 账户余额查询
     ├── douyin/                       ← 抖音脚本
-    │   └── douyin-download.js        ← 视频下载 + 评论存档（mp4 / meta.json / comments.json）
+    │   └── douyin-download.js        ← 单条视频下载 + 评论存档（mp4 / meta.json / comments.json）
     └── taobao/                       ← 淘宝脚本
         ├── taobao-cart.js            ← 购物车商品提取
         └── taobao-search.js          ← 搜索商品列表

@@ -11,6 +11,7 @@
  *   node douyin-download.js 7400000000000000000 --out ./videos
  *   node douyin-download.js 7400000000000000000 --comment-limit 200   # 只要前 200 条评论
  *   node douyin-download.js 7400000000000000000 --no-comments         # 只下视频
+ *   node douyin-download.js 7400000000000000000 --direct "<直链>"      # 直链下载（跳过开页，供批量采集用）
  *
  * 输出（默认当前目录）:
  *   <out>/<视频id>/video.mp4      视频本体
@@ -399,13 +400,14 @@ async function collectComments(target, id, limit) {
 
 async function main() {
   const argv = process.argv.slice(2);
-  const opts = { out: process.cwd(), comments: true, commentLimit: 0 };
+  const opts = { out: process.cwd(), comments: true, commentLimit: 0, direct: null };
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--out') opts.out = path.resolve(argv[++i] || '.');
     else if (a === '--no-comments') opts.comments = false;
     else if (a === '--comment-limit') opts.commentLimit = Number(argv[++i]) || 0;
+    else if (a === '--direct') opts.direct = argv[++i];
     else positional.push(a);
   }
   const outDir = opts.out;
@@ -424,6 +426,21 @@ async function main() {
     id = await resolveShortUrl(parsed.url);
   }
   console.log(id ? `   视频 id: ${id}` : '   短链没解析出 id，交给浏览器落地后再认');
+
+  // 直链模式：批量采集场景已经在详情接口里拿到了 download_addr，
+  // 再开页 goto + 等容器 + 重拉接口纯属浪费（实测每条白花 8~12s）。
+  // 这里只做「流式落盘」，meta.json 由采集脚本按接口数据写（字段比这里更全）。
+  if (opts.direct) {
+    if (!id) throw new Error('--direct 模式必须同时给出视频 id');
+    const dir = path.join(outDir, id);
+    fs.mkdirSync(dir, { recursive: true });
+    const dest = path.join(dir, 'video.mp4');
+    console.log('直链下载中…');
+    const bytes = await download(opts.direct, dest);
+    console.log(`\n完成：${dest}`);
+    console.log(`大小：${(bytes / 1024 / 1024).toFixed(2)} MB`);
+    return;
+  }
 
   console.log('② 打开视频页…');
   const page = await openDetailPage(id ? `${SITE}/video/${id}` : parsed.url);
