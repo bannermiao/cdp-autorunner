@@ -81,10 +81,14 @@ function main() {
     ecMode = 'CDN（assets/echarts.min.js 缺失）';
   }
 
+  // 报告里的「生成选题」按钮只把 report.json 的绝对路径交给 agent。
+  const norm = (p) => resolve(p).replace(/\\/g, '/');
+  const meta = { 目录: norm(dir), 报告: norm(reportFile) };
+
   let html = readFileSync(TEMPLATE, 'utf8').replace('/*__ECHARTS__*/', () => echartsJs);
   html = html.replace(
     '/*__DATA__*/null',
-    () => JSON.stringify({ card, report }).replace(/<\//g, '<\\/'),
+    () => JSON.stringify({ card, report, meta }).replace(/<\//g, '<\\/'),
   );
 
   const out = outIdx >= 0 ? resolve(argv[outIdx + 1]) : join(dir, 'report.html');

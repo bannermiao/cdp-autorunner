@@ -211,6 +211,8 @@ node {skill_path}/scripts/report.mjs <视频目录>
 单文件 `report.html`：CSS、ECharts、抽帧图全部内联，**零外部请求，断网也能显示图表**，双击即开。约 900 KB～1 MB。
 `assets/echarts.min.js` 缺失时自动退回 CDN。
 
+报告顶部有「生成选题」按钮：点开是一段投喂给 agent 的提示词，只带 `report.json` 绝对路径，复制即可直接出选题。
+
 ## 报告板块
 
 渲染顺序固定，缺素材时整块不画，不留空壳。

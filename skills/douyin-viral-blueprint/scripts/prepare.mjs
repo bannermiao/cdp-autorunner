@@ -12,7 +12,7 @@
  *   media.json    切镜时间点、帧索引、拼图索引（帧号 ↔ 秒数）
  *   转写.txt      ASR 全文，句首带 [分:秒] —— 仅在有有效口播时生成
  *   口播.json     判为无有效口播（纯音乐/只有片尾口号）时的证据：原始识别 + 度量 + 原因
- *   拼图-NN.jpg   4 列 × 16 格，每格烧时间戳（字体缺失时不烧）
+ *   拼图-NN.jpg   4 列 × 每张最多 16 格，末张按实际帧数裁掉空行；每格烧时间戳（字体缺失时不烧）
  *
  * 转写不直接落盘：先过 judgeSpeech 体检。字数 < speechMinChars 或语速 < speechMinRate
  * 就判为无口播，否则下游会把歌词当口播算出假语速、假覆盖率。
@@ -122,7 +122,7 @@ async function buildSheets(videoPath, outDir, durationSec) {
     `scale=${MEDIA.cellWidth}:-1`,
     stamp,
     'showinfo',
-    `tile=${MEDIA.cols}x${rows}:padding=4:color=white`,
+    `tile=${MEDIA.cols}x${rows}:padding=4:color=0x0a0a0a`,
   ].filter(Boolean).join(',');
 
   const log = await runFfmpeg(
@@ -136,18 +136,29 @@ async function buildSheets(videoPath, outDir, durationSec) {
 
   for (const old of readdirSync(outDir).filter((f) => /^拼图-\d+\.jpg$/.test(f))) rmSync(join(outDir, old), { force: true });
 
-  const sheets = files.map((f, b) => {
+  const sheets = [];
+  for (let b = 0; b < files.length; b++) {
     const from = b * MEDIA.cellsPerSheet + 1;
     const to = Math.min(from + MEDIA.cellsPerSheet - 1, times.length);
     const name = `拼图-${String(b + 1).padStart(2, '0')}.jpg`;
-    renameSync(join(outDir, f), join(outDir, name));
-    return {
-      文件: name, 帧从: from, 帧到: to, 格: `${MEDIA.cols}×${rows}`,
+    renameSync(join(outDir, files[b]), join(outDir, name));
+
+    // 末张没填满时整行空位裁掉：否则报告里是一整块空白，看着像图没加载
+    const usedRows = Math.ceil((to - from + 1) / MEDIA.cols);
+    if (usedRows < rows) {
+      const cut = `拼图.crop-${String(b + 1).padStart(2, '0')}.jpg`;
+      await runFfmpeg(['-y', '-i', name, '-vf', `crop=iw:trunc(ih*${usedRows}/${rows}):0:0`, '-q:v', '3', cut], outDir);
+      rmSync(join(outDir, name), { force: true });
+      renameSync(join(outDir, cut), join(outDir, name));
+    }
+
+    sheets.push({
+      文件: name, 帧从: from, 帧到: to, 格: `${MEDIA.cols}×${usedRows}`,
       秒从: times[from - 1], 秒到: times[to - 1],
       空位: MEDIA.cellsPerSheet - (to - from + 1),
       字节: statSync(join(outDir, name)).size,
-    };
-  });
+    });
+  }
 
   return {
     帧: {

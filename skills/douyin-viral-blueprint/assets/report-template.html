@@ -60,9 +60,8 @@
   .struct-list .t{flex:0 0 auto;color:var(--muted);font-variant-numeric:tabular-nums}
   .struct-list p{margin:2px 0 0 18px;line-height:1.6;color:var(--muted)}
 
-  .stage{display:flex;height:320px;align-items:center;justify-content:center;overflow:hidden}
-  @media(min-width:640px){.stage{height:430px}}
-  .stage img{max-height:100%;max-width:100%;object-fit:contain;border-radius:4px;cursor:zoom-in}
+  .stage{display:flex;max-height:430px;align-items:center;justify-content:center;overflow:hidden}
+  .stage img{max-height:430px;max-width:100%;object-fit:contain;border-radius:4px;cursor:zoom-in}
   .frame-bar{margin-top:10px;display:flex;align-items:center;gap:12px}
   .frame-bar button.nav{flex:0 0 auto;width:28px;height:28px;display:flex;align-items:center;justify-content:center;
     border:1px solid var(--border);background:transparent;color:var(--fg);border-radius:6px;cursor:pointer;font-size:16px;line-height:1}
@@ -136,12 +135,41 @@
   .gaps{margin:8px 0 0;padding-left:18px;font-size:12.8px;line-height:1.8;color:var(--warning)}
   .empty{color:var(--faint);font-size:12px}
   footer{margin-top:32px;color:var(--faint);font-size:11px;text-align:center}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
+  .btn{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;border:1px solid var(--border);
+    background:var(--input2);color:var(--fg);border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer}
+  .btn:hover{background:rgba(255,255,255,.16)}
+  .btn svg{width:13px;height:13px;flex:0 0 auto;stroke-width:1.8}
+  #topic-modal{position:fixed;inset:0;z-index:110;display:none;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.78);padding:24px}
+  #topic-modal .box{width:100%;max-width:620px;max-height:calc(100vh - 48px);display:flex;flex-direction:column;gap:10px;
+    border:1px solid var(--border);border-radius:10px;background:#111113;padding:16px}
+  #topic-modal .hd{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  #topic-modal h2{margin:0;font-size:14px;font-weight:600}
+  #topic-modal .x{border:0;background:transparent;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;padding:0 2px}
+  #topic-modal .tip{margin:0;font-size:12px;line-height:1.7;color:var(--muted)}
+  #topic-modal textarea{flex:1 1 auto;min-height:220px;resize:vertical;border:1px solid var(--border);border-radius:6px;
+    background:#0a0a0a;color:var(--fg);padding:10px;
+    font:12px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,"Microsoft YaHei","PingFang SC",monospace}
+  #topic-modal .ft{display:flex;align-items:center;justify-content:flex-end;gap:10px}
+  #topic-modal .copied{flex:1 1 auto;font-size:11.2px;color:var(--success)}
+
   #lightbox{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.85);padding:24px;cursor:zoom-out}
   #lightbox img{max-height:100%;max-width:100%;object-fit:contain;border-radius:6px}
 </style>
 </head>
 <body>
 <div id="kiln-report"><div id="app"></div></div>
+
+<div id="topic-modal">
+  <div class="box">
+    <div class="hd"><h2>生成选题</h2><button class="x" type="button" aria-label="关闭">×</button></div>
+    <p class="tip">把下面这段复制到 agent（CodeBuddy / Claude Code 等）里执行，它会调用 douyin-topic-ideation 技能，按这份报告出选题。</p>
+    <textarea id="topic-prompt" readonly spellcheck="false"></textarea>
+    <div class="ft"><span class="copied" id="topic-copied"></span><button class="btn" id="topic-copy" type="button">复制提示词</button></div>
+  </div>
+</div>
 
 <script>const DATA = /*__DATA__*/null;</script>
 
@@ -189,6 +217,11 @@
   const HL_COLORS = ['#818cf8', '#4ade80', '#fbbf24', '#e879f9', '#67e8f9', '#f87171'];
   const note = R.解读 || {};
   const parts = [];
+
+  // 顶栏 + 生成选题
+  parts.push(`<div class="topbar"><h1>爆款拆解</h1>
+    <button class="btn" id="topic-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>生成选题</button>
+  </div>`);
 
   // 指标卡
   const ICONS = {
@@ -378,6 +411,44 @@
 
   parts.push(`<footer>数字来自 card.json，判断由 agent 写</footer>`);
   app.innerHTML = parts.join('');
+
+  // 生成选题：把交给 agent 的提示词写出来，复制走即可调 douyin-topic-ideation
+  (function () {
+    const btn = document.getElementById('topic-btn');
+    const modal = document.getElementById('topic-modal');
+    const ta = document.getElementById('topic-prompt');
+    const copied = document.getElementById('topic-copied');
+    if (!btn || !modal || !ta) return;
+
+    const M = (DATA && DATA.meta) || {};
+    const rep = M.报告 || `${M.目录 ? M.目录 + '/' : ''}report.json`;
+    const buildPrompt = () => `用 douyin-topic-ideation 技能，按这份报告出选题：\n${rep}`;
+    const close = () => { modal.style.display = 'none'; };
+
+    btn.addEventListener('click', () => {
+      ta.value = buildPrompt();
+      copied.textContent = '';
+      modal.style.display = 'flex';
+      ta.scrollTop = 0;
+    });
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    modal.querySelector('.x').addEventListener('click', close);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.style.display === 'flex') close(); });
+
+    document.getElementById('topic-copy').addEventListener('click', () => {
+      const done = () => { copied.textContent = '已复制，粘到 agent 里执行'; };
+      const fallback = () => {
+        ta.focus();
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+        if (ok) done(); else copied.textContent = '自动复制受限：文字已全选，按 Ctrl+C';
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(ta.value).then(done, fallback);
+      } else fallback();
+    });
+  })();
 
   // 抽帧轮播
   (function () {
