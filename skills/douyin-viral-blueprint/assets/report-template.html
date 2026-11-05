@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分析报告</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --fg:#fafafa; --muted:#a1a1aa; --faint:#71717a;
+    --border:#27272a; --input:rgba(255,255,255,.045); --input2:rgba(255,255,255,.1);
+    --success:#4ade80; --destructive:#f87171; --warning:#fbbf24;
+    --chart-1:#d4d4d8; --chart-2:#a1a1aa; --chart-3:#818cf8; --chart-4:#e879f9; --chart-5:#67e8f9;
+  }
+  *{box-sizing:border-box;min-width:0}
+  html,body{height:auto;width:100%;margin:0;padding:0;overflow-x:hidden}
+  body{background:var(--bg);color:var(--fg);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  #kiln-report{width:100%;max-width:920px;margin:0 auto;padding:24px}
+  img,canvas{max-width:100%;height:auto}
+  h1{font-size:16px;font-weight:600;margin:0}
+  h3.sec{font-size:12px;font-weight:600;color:var(--muted);margin:28px 0 8px}
+  .card{margin-top:8px;border:1px solid var(--border);background:var(--input);border-radius:8px;padding:12px}
+  .quote{margin-top:12px;border-left:2px solid rgba(250,250,250,.4);padding:4px 0 4px 16px}
+  .quote p{margin:0;font-size:14px;line-height:1.75}
+  .status{margin:8px 0 0;font-size:12px;color:var(--warning)}
+  .status span{display:block}
+  .status .warn{color:var(--muted)}
+
+  .kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  @media(min-width:640px){.kpis{grid-template-columns:repeat(5,minmax(0,1fr))}}
+  .kpi{border:1px solid var(--border);background:var(--input);border-radius:8px;padding:10px 12px}
+  .kpi .top{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11.2px}
+  .kpi .top svg{width:14px;height:14px;stroke-width:1.75;flex:0 0 auto}
+  .kpi b{margin-top:6px;display:block;font-size:20px;font-weight:600;line-height:1;
+    letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+
+  .axes{display:grid;gap:16px}
+  @media(min-width:768px){.axes{grid-template-columns:300px 1fr;column-gap:32px}}
+  #radar{width:100%;height:280px}
+  .axis-grid{display:grid;align-content:center;gap:2px;font-size:12.8px}
+  @media(min-width:640px){.axis-grid{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px}}
+  .axis{padding:6px 0}
+  .axis b{display:block;font-weight:500;line-height:1.2}
+  .axis .desc{display:block;margin-top:2px;font-size:12px;line-height:1.6;color:var(--muted)}
+  .score{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .ticks{display:flex;flex:1;align-items:center;gap:3px}
+  .ticks i{height:3px;flex:1 1 0;min-width:0;border-radius:999px;background:var(--input2)}
+  .ticks i.on{background:var(--fg)}
+  .score dd{margin:0;width:20px;flex:0 0 auto;text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+
+  .timeline{display:flex;height:32px;gap:4px}
+  .timeline div{display:flex;align-items:center;justify-content:center;overflow:hidden;
+    border-radius:3px;color:rgba(250,250,250,.85);font-size:10.4px;font-weight:500}
+  .timeline div span{padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .struct-list{margin-top:10px;display:grid;gap:10px;font-size:12px}
+  @media(min-width:640px){.struct-list{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px}}
+  .struct-list .head{display:flex;align-items:center;gap:8px}
+  .struct-list i.dot{display:inline-block;width:10px;height:10px;flex:0 0 auto;border-radius:3px}
+  .struct-list .t{flex:0 0 auto;color:var(--muted);font-variant-numeric:tabular-nums}
+  .struct-list p{margin:2px 0 0 18px;line-height:1.6;color:var(--muted)}
+
+  .stage{display:flex;height:320px;align-items:center;justify-content:center;overflow:hidden}
+  @media(min-width:640px){.stage{height:430px}}
+  .stage img{max-height:100%;max-width:100%;object-fit:contain;border-radius:4px;cursor:zoom-in}
+  .frame-bar{margin-top:10px;display:flex;align-items:center;gap:12px}
+  .frame-bar button.nav{flex:0 0 auto;width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--border);background:transparent;color:var(--fg);border-radius:6px;cursor:pointer;font-size:16px;line-height:1}
+  .frame-bar button.nav:hover{background:var(--input2)}
+  .frame-bar .cap{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted);margin:0}
+  .frame-bar .dots{display:flex;flex:0 0 auto;align-items:center;gap:6px}
+  .frame-bar .dots button{width:6px;height:6px;padding:0;border:0;border-radius:999px;background:var(--input2);cursor:pointer}
+  .frame-bar .dots button.on{background:var(--fg)}
+  .frame-bar .cnt{flex:0 0 auto;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+  .judge .row{display:flex;gap:12px;border-bottom:1px dashed var(--border);padding:10px 0}
+  .judge .row:last-of-type{border-bottom:0}
+  .judge .label{width:80px;flex:0 0 auto;padding-top:4px}
+  .judge .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);
+    background:var(--input2);border-radius:6px;padding:2px 8px;font-size:12px;color:rgba(250,250,250,.8)}
+  .judge .pill i{width:6px;height:6px;border-radius:999px;flex:0 0 auto}
+  .judge .concl{margin:0;font-size:12.8px;line-height:1.7}
+  .judge .ptr{margin:2px 0 0;font-size:11.2px;line-height:1.6;color:var(--muted)}
+  .learn{display:grid;gap:12px;margin-top:12px;border-top:1px solid var(--border);padding-top:12px}
+  @media(min-width:640px){.learn{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .learn>div{border-radius:8px;padding:12px}
+  .learn .good{border:1px solid rgba(74,222,128,.3);background:rgba(74,222,128,.1)}
+  .learn .bad{border:1px solid rgba(248,113,113,.3);background:rgba(248,113,113,.1)}
+  .learn h4{margin:0;font-size:12px;font-weight:600}
+  .learn .good h4{color:var(--success)} .learn .bad h4{color:var(--destructive)}
+  .learn ul{margin:6px 0 0;padding:0;list-style:none;font-size:12px;line-height:1.7}
+  .learn li{border-bottom:1px dashed rgba(255,255,255,.12);padding:4px 0}
+  .learn li:last-child{border-bottom:0}
+
+  .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px}
+  .speech-wrap{display:grid;gap:12px;margin-top:10px}
+  @media(min-width:640px){.speech-wrap{grid-template-columns:1fr 52px}}
+  .speech{max-height:420px;overflow-y:auto;border-radius:6px;background:rgba(255,255,255,.06);padding:12px}
+  .speech p{display:flex;gap:8px;margin:0;padding:2px 0;font-size:12px;line-height:1.7}
+  .speech .t{flex:0 0 auto;color:var(--muted);font-variant-numeric:tabular-nums}
+  .scale{position:relative;height:420px;display:none}
+  @media(min-width:640px){.scale{display:block}}
+  .scale .rail{position:absolute;left:0;top:0;height:100%;width:8px;border-radius:999px;background:var(--input2)}
+  .scale .mark{position:absolute;left:0;width:8px;border-radius:999px}
+  .scale .tick{position:absolute;left:14px;transform:translateY(-50%);white-space:nowrap;font-size:9px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+  .dist-table{border:1px solid var(--border);border-radius:6px;overflow:hidden}
+  .dist-row{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--border);padding:8px 12px;font-size:12px}
+  .dist-row:last-child{border-bottom:0}
+  .dist-row.water{background:rgba(248,113,113,.05)}
+  .dist-row.dim{opacity:.6}
+  .dist-row .name{width:56px;flex:0 0 auto;font-weight:500}
+  .dist-row.water .name{color:var(--destructive)}
+  .dist-row .mean{flex:1 1 auto;color:var(--muted);line-height:1.6}
+  .dist-row .n{width:48px;flex:0 0 auto;text-align:right;font-variant-numeric:tabular-nums}
+  .dist-row .pct{width:40px;flex:0 0 auto;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+  .clusters{display:grid;gap:10px}
+  @media(min-width:640px){.clusters{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .cluster{border:1px solid var(--border);border-radius:6px;padding:10px 12px}
+  .cluster .head{display:flex;align-items:baseline;gap:8px}
+  .cluster .head b{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:500}
+  .cluster .head span{flex:0 0 auto;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .cluster .bar{margin-top:6px;height:6px;width:100%;overflow:hidden;border-radius:4px;background:rgba(255,255,255,.1)}
+  .cluster .bar div{height:100%;border-radius:4px;background:var(--chart-2)}
+  .cluster p{margin:6px 0 0;font-size:11.2px;line-height:1.6;color:var(--muted)}
+  .two-charts{display:grid;gap:16px}
+  @media(min-width:768px){.two-charts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .chart-label{margin:0 0 4px;font-size:12px;color:var(--muted)}
+
+  .dims{display:grid;gap:16px}
+  @media(min-width:640px){.dims{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .dims ul{margin:6px 0 0;padding-left:18px;font-size:12.8px;line-height:1.8}
+  .dims .ptr{color:var(--faint);font-size:11px}
+  .gaps{margin:8px 0 0;padding-left:18px;font-size:12.8px;line-height:1.8;color:var(--warning)}
+  .empty{color:var(--faint);font-size:12px}
+  footer{margin-top:32px;color:var(--faint);font-size:11px;text-align:center}
+  #lightbox{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.85);padding:24px;cursor:zoom-out}
+  #lightbox img{max-height:100%;max-width:100%;object-fit:contain;border-radius:6px}
+</style>
+</head>
+<body>
+<div id="kiln-report"><div id="app"></div></div>
+
+<script>const DATA = /*__DATA__*/null;</script>
+
+<script>
+/*__ECHARTS__*/
+</script>
+
+<script>
+(function () {
+  const { card, report } = DATA || {};
+  const app = document.getElementById('app');
+  if (!card || !report) { app.innerHTML = '<p class="empty">数据不完整：需要 card.json 与 report.json</p>'; return; }
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const num = (n) => (n == null || Number.isNaN(Number(n)) ? '—' : Number(n).toLocaleString('zh-CN'));
+  const dur = (sec) => {
+    const s = Math.max(0, Math.round(Number(sec) || 0));
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  };
+
+  const V = card.视频 || {};
+  const S = V.数据 || {};
+  const C = card.评论 || {};
+  const CL = C.聚类 || {};
+  const R = report.评估 || {};
+  const AXES = ['涨粉力', '变现力', '传播力', '收藏力', '互动力', '长尾力'];
+  const AXIS_DESC = {
+    涨粉力: '内容能否直接路转粉、作者 IP 属性强不强',
+    变现力: '潜在商业价值，能否带来直接或间接收益',
+    传播力: '能否引起共鸣、让人愿意主动转发',
+    收藏力: '内容对观众有用、有意义，值不值收藏',
+    互动力: '有无争议点、讨论点，能否引发广泛评论',
+    长尾力: '有无长尾效应、受不受热点影响',
+  };
+  const LABEL_ZH = { substance: '有内容', intent: '意向', emotion: '情绪', ai_assist: 'AI 代劳', water: '灌水', spam: '广告', unlabeled: '未标注' };
+  const LABEL_MEAN = {
+    substance: '具体提问、使用反馈、经验讨论',
+    intent: '购买/价格/资源/追更/求教意向',
+    emotion: '情绪表达、共鸣、应援，无具体信息',
+    ai_assist: '指挥评论区 AI 助手干活',
+    water: '纯应景无信息：复读、打卡、纯表情',
+    spam: '广告、引流、模板控评',
+    unlabeled: '这次没标注上，不计水也不进簇',
+  };
+  const HL_COLORS = ['#818cf8', '#4ade80', '#fbbf24', '#e879f9', '#67e8f9', '#f87171'];
+  const note = R.解读 || {};
+  const parts = [];
+
+  // 指标卡
+  const ICONS = {
+    时长: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    点赞: '<path d="M19 14c1.5-1.5 2-3.5 2-5a4 4 0 0 0-7-2.6A4 4 0 0 0 3 9c0 1.5.5 3.5 2 5l7 7z"/>',
+    收藏: '<path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5L2.6 9.8l6.5-.9z"/>',
+    评论: '<path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/>',
+    转发: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="19" r="3"/><path d="M8.6 8.6 15.4 5.4M15.4 18.6 8.6 15.4"/>',
+  };
+  const kpi = (name, value) => `<div class="kpi"><div class="top"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg><span>${name}</span></div><b>${value}</b></div>`;
+  parts.push(`<div class="kpis">${kpi('时长', dur(V.时长秒))}${kpi('点赞', num(S.赞))}${kpi('收藏', num(S.藏))}${kpi('评论', num(S.评))}${kpi('转发', num(S.转))}</div>`);
+
+  // 一句话结论 + 状态
+  const st = report.状态 || {};
+  const stHtml = ((st.待补 || []).length || (st.提醒 || []).length)
+    ? `<p class="status">${(st.待补 || []).map((x) => `<span>待补 · ${esc(x)}</span>`).join('')}${(st.提醒 || []).map((x) => `<span class="warn">提醒 · ${esc(x)}</span>`).join('')}</p>`
+    : '';
+  parts.push(`<div class="quote"><p>${esc(report.一句话结论 || '')}</p>${stHtml}</div>`);
+
+  // 六轴画像
+  const axes = R.六轴 || {};
+  const axisRows = AXES.map((k) => {
+    const v = axes[k];
+    const on = v == null ? 0 : Math.round(Number(v));
+    return `<div class="axis">
+      <b>${k}</b><span class="desc">${AXIS_DESC[k]}</span>
+      <div class="score" title="${k} ${v == null ? '—' : v}/10">
+        <span class="ticks">${Array.from({ length: 10 }, (_, i) => `<i class="${i < on ? 'on' : ''}"></i>`).join('')}</span>
+        <dd>${v == null ? '—' : v}</dd>
+      </div></div>`;
+  }).join('');
+  parts.push(`<section><h3 class="sec">六轴画像</h3>
+    <div class="card axes"><div id="radar"></div><div class="axis-grid">${axisRows}</div></div>
+    ${note.六轴 ? `<div class="quote"><p>${esc(note.六轴)}</p></div>` : ''}
+  </section>`);
+
+  // 结构与时间色条
+  const chapters = Array.isArray(V.章节) ? V.章节 : [];
+  let struct = Array.isArray(report.结构) && report.结构.length >= 2 ? report.结构.slice().sort((a, b) => a.起始秒 - b.起始秒) : null;
+  let byPlatform = false;
+  if (!struct && chapters.length >= 2) {
+    byPlatform = true;
+    struct = chapters.slice().sort((a, b) => Number(a.t || 0) - Number(b.t || 0)).map((c) => ({ 起始秒: Number(c.t || 0), 段名: String(c.名 || '').slice(0, 6) }));
+  }
+  if (struct && struct.length >= 2) {
+    const total = Number(V.时长秒) || 1;
+    const segs = struct.map((s, i) => {
+      const end = i + 1 < struct.length ? Number(struct[i + 1].起始秒) : total;
+      const w = Math.max(2, ((end - Number(s.起始秒)) / total) * 100);
+      return `<div style="width:${w}%;background:color-mix(in oklab, var(--chart-${(i % 5) + 1}) 42%, transparent)" title="${dur(s.起始秒)}–${dur(end)} · ${esc(s.段名)}"><span>${w > 9 ? esc(s.段名) : ''}</span></div>`;
+    }).join('');
+    const list = struct.map((s, i) => `<div>
+      <div class="head"><i class="dot" style="background:var(--chart-${(i % 5) + 1})"></i><span class="t">${dur(s.起始秒)}</span><b>${esc(s.段名 || '')}</b></div>
+      ${s.概括 ? `<p>${esc(s.概括)}</p>` : ''}</div>`).join('');
+    parts.push(`<section><h3 class="sec">结构 · ${byPlatform ? '平台章节' : 'AI 划分'}</h3>
+      <div class="card"><div class="timeline">${segs}</div><div class="struct-list">${list}</div></div></section>`);
+  }
+
+  // 视频抽帧
+  const sheets = Array.isArray(card.画面?.拼图) ? card.画面.拼图 : [];
+  if (sheets.length) {
+    const imgs = sheets.map((p, i) => `<img class="fc-frame" data-cap="${esc(p.格)} · ${dur(p.秒从)}–${dur(p.秒到)}" src="${esc(p.dataUrl || p.文件)}" alt="拼图 ${i + 1}/${sheets.length}" style="${i === 0 ? '' : 'display:none'}" draggable="false">`).join('');
+    const dots = sheets.map((_, i) => `<button class="${i === 0 ? 'on' : ''}" aria-label="第 ${i + 1} 张"></button>`).join('');
+    parts.push(`<section><h3 class="sec">视频抽帧</h3>
+      <div class="card"><div id="frame-carousel">
+        <div class="stage">${imgs}</div>
+        <div class="frame-bar">
+          <button class="nav fc-prev" aria-label="上一张">‹</button>
+          <button class="nav fc-next" aria-label="下一张">›</button>
+          <p class="cap fc-cap">${esc(sheets[0].格)} · ${dur(sheets[0].秒从)}–${dur(sheets[0].秒到)}</p>
+          <span class="dots">${dots}</span>
+          <span class="cnt fc-count">1/${sheets.length}</span>
+        </div>
+      </div></div>
+      ${note.画面 ? `<div class="quote"><p>${esc(note.画面)}</p></div>` : ''}
+    </section>`);
+  }
+
+  // 整体分析
+  const judges = Array.isArray(report.判断) ? report.判断 : [];
+  if (judges.length) {
+    const DOT = { 好: 'var(--success)', 警示: 'var(--destructive)', 信息: 'rgba(161,161,170,.6)' };
+    const rows = judges.map((j) => `<div class="row">
+      <span class="label"><span class="pill"><i style="background:${DOT[j.评价] || 'rgba(161,161,170,.4)'}"></i>${esc(j.项)}</span></span>
+      <div style="flex:1 1 auto">
+        <p class="concl">${esc(j.结论 || '')}</p>
+        ${Array.isArray(j.依据) && j.依据.length ? `<p class="ptr">依据：${j.依据.map(esc).join('、')}</p>` : ''}
+      </div></div>`).join('');
+    const learnList = (arr, cls, title) => (Array.isArray(arr) && arr.length ? `<div class="${cls}"><h4>${title}</h4><ul>${arr.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : '');
+    parts.push(`<section><h3 class="sec">整体分析</h3>
+      <div class="card judge">${rows}<div class="learn">${learnList(R.该学的, 'good', '该学的')}${learnList(R.别学的, 'bad', '别学的')}</div></div></section>`);
+  }
+
+  // 口播内容 + 位置标尺 + 总结
+  const speech = Array.isArray(card.口播稿) ? card.口播稿 : [];
+  const hls = Array.isArray(report.高亮) ? report.高亮 : [];
+  if (speech.length && hls.length) {
+    const roleColor = {};
+    [...new Set(hls.map((h) => h.角色))].forEach((r, i) => { roleColor[r] = HL_COLORS[i % HL_COLORS.length]; });
+    const hitOf = (t) => hls.find((h) => t >= h.起秒 - 2 && t <= (h.止秒 ?? h.起秒) + 2);
+    const lines = speech.map((x) => {
+      const hit = hitOf(x.t);
+      const style = hit ? ` style="color:${roleColor[hit.角色]};font-weight:600"` : '';
+      const title = hit && hit.为什么 ? ` title="${esc(hit.为什么)}"` : '';
+      return `<p><span class="t">${dur(x.t)}</span><span${style}${title}>${esc(x.s)}</span></p>`;
+    }).join('');
+    const legend = Object.keys(roleColor).map((r) => {
+      const why = (hls.find((h) => h.角色 === r) || {}).为什么 || '';
+      return `<span title="${esc(why)}"><i style="background:${roleColor[r]}"></i>${esc(r)}</span>`;
+    }).join('');
+    const total = Number(V.时长秒) || 1;
+    const marks = [];
+    speech.forEach((x, i) => {
+      const hit = hitOf(x.t);
+      if (!hit || !roleColor[hit.角色]) return;
+      const end = i + 1 < speech.length ? speech[i + 1].t : total;
+      marks.push({ top: (x.t / total) * 100, h: Math.max(0.35, ((end - x.t) / total) * 100), color: roleColor[hit.角色], role: hit.角色, t: x.t });
+    });
+    const scale = marks.length
+      ? `<div class="scale" title="口播内容在全片的位置"><div class="rail"></div>${marks.map((m) => `<div class="mark" style="top:${m.top}%;height:${m.h}%;background:${m.color}" title="${esc(m.role)} · ${dur(m.t)}"></div>`).join('')}${[0, 0.25, 0.5, 0.75, 1].map((p) => `<span class="tick" style="top:${p * 100}%">${dur(total * p)}</span>`).join('')}</div>`
+      : '';
+    const summary = Array.isArray(report.口播总结) && report.口播总结.length ? `<div class="quote">${report.口播总结.map((x, i) => `<p>${i + 1}. ${esc(x)}</p>`).join('')}</div>` : '';
+    parts.push(`<section><h3 class="sec">口播内容</h3>
+      <div class="card"><div class="legend">${legend}</div><div class="speech-wrap"><div class="speech">${lines}</div>${scale}</div></div>
+      ${summary}</section>`);
+  }
+
+  // 口播节奏
+  const curve = Array.isArray(card.密度曲线) ? card.密度曲线 : [];
+  if (curve.length) {
+    parts.push(`<section><h3 class="sec">口播节奏</h3><div class="card"><div id="density" style="width:100%;height:180px"></div></div>
+      ${note.口播节奏 ? `<div class="quote"><p>${esc(note.口播节奏)}</p></div>` : ''}</section>`);
+  }
+
+  // 评论分析
+  const dist = CL.分布 || null;
+  const clusters = Array.isArray(CL.簇) ? CL.簇 : [];
+  const names = Array.isArray(R.评论簇) ? R.评论簇 : [];
+  const rate = CL.水评率;
+  if (Number(C.采到) > 0) {
+    const distRows = dist ? ['substance', 'intent', 'emotion', 'ai_assist', 'water', 'spam', 'unlabeled'].filter((k) => dist[k]).map((k) => {
+      const n = dist[k];
+      const pct = C.采到 ? ((n / C.采到) * 100).toFixed(0) : '0';
+      const water = k === 'water' || k === 'spam';
+      const dim = k === 'unlabeled';
+      return `<div class="dist-row ${water ? 'water' : ''} ${dim ? 'dim' : ''}"><span class="name">${LABEL_ZH[k]}</span><span class="mean">${LABEL_MEAN[k]}</span><span class="n">${n} 条</span><span class="pct">${pct}%</span></div>`;
+    }).join('') : '';
+    const maxN = clusters.length ? Math.max(...clusters.map((c) => c.成员数)) : 1;
+    const clusterCards = clusters.map((c) => {
+      const named = names.find((x) => Number(x.簇) === Number(c.id));
+      return `<div class="cluster"><div class="head"><b>${esc(named ? named.名 : `簇 ${c.id}`)}</b><span>${c.成员数} 条 · 赞 ${num(c.赞合计)}</span></div>
+        <div class="bar"><div style="width:${Math.round((c.成员数 / maxN) * 100)}%"></div></div>
+        ${named && named.一句话 ? `<p>${esc(named.一句话)}</p>` : ''}</div>`;
+    }).join('');
+    const hasTail = C.时间分布 && Object.keys(C.时间分布).length;
+    const hasGeo = Array.isArray(C.地区Top) && C.地区Top.length;
+    parts.push(`<section><h3 class="sec">评论分析${CL.口径 ? `（${esc(CL.口径)}）` : ''}</h3>
+      <div class="card" style="display:grid;gap:16px">
+        ${typeof rate === 'number' ? `<div><p class="chart-label">评论区质量（水评率）</p><div id="water" style="width:100%;height:190px"></div></div>` : ''}
+        ${distRows ? `<div class="dist-table">${distRows}</div>` : '<p class="empty">这次是字数口径，没有标签分布</p>'}
+        ${clusters.length ? `<div><p class="chart-label">评论在聊什么</p><div class="clusters">${clusterCards}</div></div>` : ''}
+        ${hasTail || hasGeo ? `<div class="two-charts">
+          ${hasTail ? `<div><p class="chart-label">评论长尾（发布后累积到达）</p><div id="tail" style="width:100%;height:190px"></div></div>` : ''}
+          ${hasGeo ? `<div><p class="chart-label">观众地域（仅境内）</p><div id="geo" style="width:100%;height:190px"></div></div>` : ''}
+        </div>` : ''}
+      </div>
+      ${note.评论区 ? `<div class="quote"><p>${esc(note.评论区)}</p></div>` : ''}
+    </section>`);
+  }
+
+  // 维度提炼
+  const dims = report.维度 || {};
+  const dimList = (arr) => (Array.isArray(arr) && arr.length
+    ? `<ul>${arr.map((x) => `<li>${esc(x.值)}${Array.isArray(x.依据) && x.依据.length ? `<span class="ptr">（${x.依据.map(esc).join('、')}）</span>` : ''}</li>`).join('')}</ul>`
+    : '<p class="empty">没提炼出候选</p>');
+  if ((dims['话题/行业'] || []).length || (dims['目标观众'] || []).length) {
+    parts.push(`<section><h3 class="sec">维度提炼</h3><div class="dims">
+      <div class="card"><b>话题 / 行业</b>${dimList(dims['话题/行业'])}</div>
+      <div class="card"><b>目标观众</b>${dimList(dims['目标观众'])}</div>
+    </div></section>`);
+  }
+
+  // 缺口
+  if (Array.isArray(report.缺口) && report.缺口.length) {
+    parts.push(`<section><h3 class="sec">缺口</h3><ul class="gaps">${report.缺口.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></section>`);
+  }
+
+  parts.push(`<footer>数字来自 card.json，判断由 agent 写</footer>`);
+  app.innerHTML = parts.join('');
+
+  // 抽帧轮播
+  (function () {
+    const box = document.getElementById('frame-carousel');
+    if (!box) return;
+    const frames = [].slice.call(box.querySelectorAll('.fc-frame'));
+    const cap = box.querySelector('.fc-cap');
+    const cnt = box.querySelector('.fc-count');
+    const dots = [].slice.call(box.querySelectorAll('.dots button'));
+    let i = 0;
+    const show = (n) => {
+      i = (n + frames.length) % frames.length;
+      frames.forEach((x, k) => { x.style.display = k === i ? '' : 'none'; });
+      dots.forEach((d, k) => d.classList.toggle('on', k === i));
+      if (cap) cap.textContent = frames[i].getAttribute('data-cap') || '';
+      if (cnt) cnt.textContent = `${i + 1}/${frames.length}`;
+    };
+    box.querySelector('.fc-prev').addEventListener('click', () => show(i - 1));
+    box.querySelector('.fc-next').addEventListener('click', () => show(i + 1));
+    dots.forEach((d, k) => d.addEventListener('click', () => show(k)));
+    const lb = document.getElementById('lightbox');
+    frames.forEach((im) => im.addEventListener('click', () => { lb.querySelector('img').src = im.src; lb.style.display = 'flex'; }));
+    show(0);
+  })();
+
+  // 图表
+  Promise.resolve(window.__ec || window.echarts || null).then((ec) => {
+    if (!ec) return;
+    const css = (n, fb) => (getComputedStyle(document.documentElement).getPropertyValue(n).trim() || fb);
+    const ink = css('--muted', '#a1a1aa');
+    const line = '#27272a';
+    const draw = (id, option) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const chart = ec.init(el, null, { renderer: 'canvas' });
+      chart.setOption(option);
+      window.addEventListener('resize', () => chart.resize());
+    };
+    const gridBase = { left: 8, right: 12, top: 12, bottom: 6, containLabel: true };
+
+    if (axes['涨粉力'] != null) {
+      draw('radar', {
+        radar: {
+          radius: '66%', indicator: AXES.map((k) => ({ name: k, max: 10 })),
+          name: { textStyle: { color: ink, fontSize: 11 } },
+          splitLine: { lineStyle: { color: line } },
+          splitArea: { areaStyle: { color: ['rgba(255,255,255,.02)', 'rgba(255,255,255,.045)'] } },
+          axisLine: { lineStyle: { color: line } },
+        },
+        series: [{ type: 'radar', data: [{ value: AXES.map((k) => axes[k] ?? 0) }], areaStyle: { color: 'rgba(167,139,250,.22)' }, lineStyle: { color: '#a78bfa', width: 2 }, itemStyle: { color: '#a78bfa' }, symbolSize: 4 }],
+      });
+    }
+    if (curve.length) {
+      draw('density', {
+        grid: gridBase, tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: curve.map((_, i) => `${i * 30}s`), axisLine: { lineStyle: { color: line } }, axisTick: { show: false }, axisLabel: { color: ink, fontSize: 10, interval: Math.max(0, Math.ceil(curve.length / 8) - 1) } },
+        yAxis: { type: 'value', axisLine: { show: false }, axisTick: { show: false }, splitLine: { lineStyle: { color: line } }, axisLabel: { color: ink, fontSize: 10 } },
+        series: [{ type: 'bar', data: curve, barMaxWidth: 22, itemStyle: { color: '#818cf8' } }],
+      });
+    }
+    if (typeof rate === 'number') {
+      draw('water', {
+        tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
+        series: [{ type: 'pie', radius: ['58%', '80%'], center: ['50%', '52%'], label: { position: 'center', color: '#fafafa', fontSize: 16, formatter: `${(rate * 100).toFixed(1)}%` }, labelLine: { show: false },
+          data: [{ value: rate, name: '水评', itemStyle: { color: '#f87171' } }, { value: Math.max(0, 1 - rate), name: '有效', itemStyle: { color: '#3f3f46' } }] }],
+      });
+    }
+    const tail = C.时间分布;
+    if (tail && Object.keys(tail).length) {
+      const keys = Object.keys(tail);
+      const totalN = keys.reduce((s, k) => s + tail[k], 0) || 1;
+      let acc = 0;
+      const cum = keys.map((k) => { acc += tail[k]; return Number(((acc / totalN) * 100).toFixed(0)); });
+      draw('tail', {
+        grid: gridBase, tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: keys, axisLine: { lineStyle: { color: line } }, axisTick: { show: false }, axisLabel: { color: ink, fontSize: 10 } },
+        yAxis: { type: 'value', max: 100, splitLine: { lineStyle: { color: line } }, axisLabel: { color: ink, fontSize: 10, formatter: '{value}%' } },
+        series: [{ type: 'line', data: cum, smooth: true, symbolSize: 4, itemStyle: { color: '#67e8f9' }, lineStyle: { color: '#67e8f9', width: 2 }, areaStyle: { color: 'rgba(103,232,249,.12)' } }],
+      });
+    }
+    if (Array.isArray(C.地区Top) && C.地区Top.length) {
+      const top = C.地区Top.slice(0, 8).slice().reverse();
+      draw('geo', {
+        grid: { left: 8, right: 24, top: 6, bottom: 6, containLabel: true }, tooltip: { trigger: 'axis' },
+        xAxis: { type: 'value', splitLine: { lineStyle: { color: line } }, axisLabel: { color: ink, fontSize: 10 } },
+        yAxis: { type: 'category', data: top.map((x) => x.名), axisLine: { lineStyle: { color: line } }, axisTick: { show: false }, axisLabel: { color: ink, fontSize: 10 } },
+        series: [{ type: 'bar', data: top.map((x) => x.条数), barMaxWidth: 14, itemStyle: { color: '#d4d4d8' } }],
+      });
+    }
+  });
+})();
+</script>
+<div id="lightbox"><img alt="放大查看"></div>
+</body>
+</html>

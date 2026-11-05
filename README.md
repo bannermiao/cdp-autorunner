@@ -44,6 +44,18 @@ cdp-server browser screenshot                          # 截图（保存到当�
 cdp-server stop
 ```
 
+## Skill 目录
+
+| 目录 | 类型 | 内容 |
+| --- | --- | --- |
+| `cdp-autorunner-skill/` | 核心 skill | CLI 命令参考 + 通用站点脚本（google / taobao / deepseek / douyin / ebay） |
+| `skills/ebay-research-skill/` | 应用 skill | eBay 选品调研：列表 → 详情 → 成交记录 → HTML/xlsx/JSON 三份交付 |
+| `skills/douyin-viral-blueprint/` | 应用 skill | 抖音爆款拆解：切镜抽帧 + 口播转写 + 评论聚类 → 单文件 HTML 报告 |
+
+核心 skill 提供通用的浏览器操作底座；应用 skill 是各自闭环的业务流程，目录内自带 `SKILL.md`、`references/`、`scripts/`，按各 `SKILL.md` 的 SOP 执行。
+
+需要操作浏览器的 skill 各自持有 `scripts/cdp-server(.exe)`，通过同一个 daemon（`127.0.0.1:18765`）和同一个扩展工作，二进制版本需保持一致；只做本地分析的 skill（如 `douyin-viral-blueprint`）不依赖该二进制。
+
 ## 示例
 
 可直接运行内置的示例脚本（需已启动 daemon 及扩展）：
@@ -61,11 +73,17 @@ node cdp-autorunner-skill/scripts/taobao/taobao-search.js "商品名"
 # DeepSeek 余额 — 查询 DeepSeek 账户余额
 node cdp-autorunner-skill/scripts/deepseek/deepseek-balance.js
 
-# eBay 调研 — 搜索产品并生成可视化报表
+# eBay 快速调研 — 搜索产品并生成可视化报表（通用简版）
 node cdp-autorunner-skill/scripts/ebay/ebay-research.js "产品名"
 
 # 抖音下载 — 视频本体 + 详情 + 全量一级评论（分享短链/文案直接粘）
 node cdp-autorunner-skill/scripts/douyin/douyin-download.js "https://v.douyin.com/xxxxxxx/" --out ./videos
+
+# eBay 深度调研 — 60 个商品 3 并发，产出 HTML/xlsx/JSON 三份交付
+node skills/ebay-research-skill/scripts/ebay/ebay-research.js "headlight" --limit 60 --concurrency 3
+
+# 抖音爆款拆解 — 对下载好的素材做切镜/转写/评论聚类并出报告
+node skills/douyin-viral-blueprint/scripts/prepare.mjs <视频目录>
 ```
 
 ## 项目结构
@@ -81,5 +99,11 @@ cdp-server/
 │   ├── background.js     ┃   WebSocket 服务端（ws://127.0.0.1:18765）
 │   └── popup.html/js     ┃   弹出面板 UI
 ├── scripts/              ← 二进制放置目录（从 GitHub Release 下载）
-└── cdp-autorunner-skill/ ← 示例脚本与 Skill 文档
+├── docs/                 ← 发布流程文档
+├── cdp-autorunner-skill/ ← 核心 skill：CLI 参考 + 通用站点脚本
+└── skills/               ← 应用 skill（各自独立的能力包）
+    ├── ebay-research-skill/      ┃ eBay 选品调研
+    └── douyin-viral-blueprint/   ┃ 抖音爆款拆解
 ```
+
+发布流程见 `docs/RELEASE.md`。

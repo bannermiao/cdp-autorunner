@@ -1,6 +1,6 @@
 # 版本号更新 & 发布流程
 
-> 本文档记录 cdp-server（CLI）、Chrome 扩展、skill 下载脚本三处版本号的更新与发布步骤，供下次发版参考。
+> 本文档记录 cdp-server（CLI）、Chrome 扩展、各 skill 下载版本的更新与发布步骤。
 
 ## 一、版本号位置速查
 
@@ -12,6 +12,8 @@
 | skill 下载版本号（bash） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `VERSION="v1.4.2"` |
 | skill 下载版本号（PowerShell） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `$VERSION = "v1.4.2"` |
 | skill version 输出示例 | `cdp-autorunner-skill/references/cdp-server-cli.md` | `cdp-server v1.4.2` |
+| 应用 skill 下载版本号 | `skills/*/SKILL.md`（含 `I-0` 安装段的 skill，如 `ebay-research-skill`；bash 与 PowerShell 各一处） | `VERSION="v1.4.2"` |
+| 应用 skill version 输出示例 | `skills/ebay-research-skill/references/cdp-cli.md` | `cdp-server v1.4.2` |
 
 > 注：CLI 与扩展版本号独立，不必一致（如 CLI v1.2.0 / 扩展 2.2.0）。
 
@@ -50,29 +52,32 @@ LDFLAGS="-X cdp-server/cmd.version=${{ github.ref_name }}"
 
 > 注意：两处必须一致，否则扩展页面显示的版本号与实际不符。
 
-### 步骤 3：修改 skill 下载版本号（3 处）
+### 步骤 3：修改 skill 下载版本号（每个 skill 的 bash / PowerShell 各 1 处）
 
 - `cdp-autorunner-skill/SKILL.md`：`VERSION="vX.Y.Z"` 和 `$VERSION = "vX.Y.Z"`
 - `cdp-autorunner-skill/references/cdp-server-cli.md`：`cdp-server vX.Y.Z` 输出示例
+- `skills/*/SKILL.md`：含下载段的 skill 同样改 bash 与 PowerShell 两处（如 `skills/ebay-research-skill/SKILL.md`）
+- `skills/*/references/*.md`：出现 `cdp-server vX.Y.Z` 输出示例的一并改（如 `skills/ebay-research-skill/references/cdp-cli.md`）
 
-### 步骤 4：同步 skill 脚本（如有代码更新）
+### 步骤 4：skill 脚本归属
 
-根目录新版脚本需同步到 skill，并改用 skill 惯例定位二进制：
+脚本只存在各自的 skill 目录，不跨目录复制：
 
-```powershell
-Copy-Item ebay-research.js        e:/skills/cdp-autorunner/cdp-autorunner-skill/scripts/ebay/ebay-research.js -Force
-Copy-Item ebay-research-worker.js e:/skills/cdp-autorunner/cdp-autorunner-skill/scripts/ebay/ebay-research-worker.js -Force
-```
+| skill | 脚本位置 |
+| --- | --- |
+| `cdp-autorunner-skill` | `cdp-autorunner-skill/scripts/<站点>/`（google / taobao / deepseek / douyin / ebay） |
+| 应用 skill | `skills/<skill-name>/scripts/`，按该 skill 内部结构分层（如 `ebay-research-skill/scripts/{ebay,lib,vendor}`） |
 
-同步后脚本中 `CDP_BIN` 定位须为 skill 惯例（从 `scripts/` 上级目录加载，即 `path.join(__dirname, '..', name)`），否则找不到二进制。
+需要调用二进制的 skill，脚本用 `__dirname` 从 `scripts/` 上级目录定位（`path.join(__dirname, '..', name)`），不读仓库根路径。
 
-### 步骤 5：编译本机二进制并复制到 3 处
+### 步骤 5：编译本机二进制并复制到各 skill
 
 ```powershell
 cd e:/skills/cdp-autorunner/cdp-server
 go build -o cdp-server.exe .                          # 输出即仓库内副本 cdp-server\cdp-server.exe
 Copy-Item cdp-server.exe ..\scripts\cdp-server.exe -Force
 Copy-Item cdp-server.exe ..\cdp-autorunner-skill\scripts\cdp-server.exe -Force
+Copy-Item cdp-server.exe ..\skills\ebay-research-skill\scripts\cdp-server.exe -Force
 ```
 
 > 注意：`bin/` 目录已于 2026-08-20 随 npm 发布内容一并删除，**不要再复制到 `bin/`**。
