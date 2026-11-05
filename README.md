@@ -63,6 +63,9 @@ node cdp-autorunner-skill/scripts/deepseek/deepseek-balance.js
 
 # eBay 调研 — 搜索产品并生成可视化报表
 node cdp-autorunner-skill/scripts/ebay/ebay-research.js "产品名"
+
+# 抖音下载 — 视频本体 + 详情 + 全量一级评论（分享短链/文案直接粘）
+node cdp-autorunner-skill/scripts/douyin/douyin-download.js "https://v.douyin.com/xxxxxxx/" --out ./videos
 ```
 
 ## 项目结构
