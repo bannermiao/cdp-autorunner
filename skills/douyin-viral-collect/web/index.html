@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>采集库</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="app" v-cloak>
+  <header class="bar">
+    <div class="brand">采集库 <span class="count">{{ items.length }}</span></div>
+    <div class="tabs">
+      <button :class="{ on: filter === 'all' }" @click="filter = 'all'">全部</button>
+      <button :class="{ on: filter === 'fav' }" @click="filter = 'fav'">收藏 {{ favCount }}</button>
+    </div>
+    <div class="live" :class="{ on: live }">{{ live ? '实时连接' : '未连接' }}</div>
+  </header>
+
+  <main v-if="shown.length" class="grid">
+    <article class="card" v-for="it in shown" :key="it.id" :class="{ picked: picked.includes(it.id) }">
+      <label class="pick">
+        <input type="checkbox" :checked="picked.includes(it.id)" @change="toggle(it.id)">
+      </label>
+      <div class="cover" @click="play(it)">
+        <img v-if="it.cover" :src="'/cover/' + it.id" loading="lazy" alt="">
+        <div v-else class="noimg">无封面</div>
+        <span class="dur">{{ fmtDur(it.durationSec) }}</span>
+        <span class="badge" v-if="it.score">{{ it.score.contentType }}</span>
+      </div>
+      <div class="body">
+        <h3 :title="it.desc">{{ it.desc || '(无文案)' }}</h3>
+        <div class="meta">
+          <span class="nick">{{ it.author && it.author.nickname || '-' }}</span>
+          <span>{{ fmtNum(it.author && it.author.follower) }} 粉</span>
+        </div>
+        <div class="stats">
+          <span>赞 {{ fmtNum(it.stats && it.stats.digg) }}</span>
+          <span>评 {{ fmtNum(it.stats && it.stats.comment) }}</span>
+          <span>藏 {{ fmtNum(it.stats && it.stats.collect) }}</span>
+          <span>转 {{ fmtNum(it.stats && it.stats.share) }}</span>
+        </div>
+        <div class="ops">
+          <button class="ghost" :class="{ star: it.fav }" @click="fav(it)">{{ it.fav ? '已收藏' : '收藏' }}</button>
+          <button class="ghost danger" @click="del(it)">删除</button>
+        </div>
+      </div>
+    </article>
+  </main>
+  <div v-else class="empty">{{ loading ? '加载中…' : '还没有采集到视频' }}</div>
+
+  <div class="bulk" v-if="picked.length">
+    <span class="n">已选 {{ picked.length }} 条</span>
+    <button class="ghost" @click="selectAll">全选</button>
+    <button class="ghost" @click="clearSel">取消</button>
+    <button class="ghost danger" @click="bulkDelete">批量删除</button>
+    <button class="primary" @click="report">批量生成报告</button>
+  </div>
+
+  <div class="mask" v-if="playing" @click.self="closePlay">
+    <div class="modal player">
+      <button class="x" @click="closePlay">关闭</button>
+      <video :src="'/media/' + playing.id" controls autoplay playsinline></video>
+      <div class="pinfo">
+        <h3>{{ playing.desc || '(无文案)' }}</h3>
+        <p>{{ playing.author && playing.author.nickname }} · {{ fmtDur(playing.durationSec) }} · 赞 {{ fmtNum(playing.stats && playing.stats.digg) }}</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="mask" v-if="reportText" @click.self="reportText = ''">
+    <div class="modal report">
+      <button class="x" @click="reportText = ''">关闭</button>
+      <h3>批量生成报告</h3>
+      <p class="hint">复制下面这段发给助手：</p>
+      <textarea readonly :value="reportText" @focus="$event.target.select()"></textarea>
+      <div class="row">
+        <button class="primary" @click="copy">{{ copied ? '已复制' : '复制' }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/vue.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

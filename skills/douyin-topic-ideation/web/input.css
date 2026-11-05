@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 底色用原始声明而不是 @apply：base 层的 @apply 在压缩后会被 preflight 覆盖掉 */
+html,
+body {
+  background-color: #030712;
+  color: #f3f4f6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background-color: rgba(59, 130, 246, 0.3);
+}
+
+@layer components {
+  .card-item {
+    @apply bg-gray-900 border border-gray-800 rounded-lg p-5 hover:border-gray-700 transition-colors;
+  }
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+  }
+  .badge-generic { @apply bg-blue-500/10 text-blue-300; }
+  .badge-persona { @apply bg-purple-500/10 text-purple-300; }
+  .badge-convert { @apply bg-amber-500/10 text-amber-300; }
+  .badge-path { @apply bg-gray-700/50 text-gray-300; }
+  .badge-el { @apply bg-teal-500/10 text-teal-300; }
+  .btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors;
+  }
+  .btn-primary { @apply bg-blue-600 text-white border-blue-600 hover:bg-blue-500; }
+  .btn-ghost { @apply bg-gray-800 text-gray-200 border-gray-700 hover:bg-gray-700; }
+  .btn-danger { @apply bg-gray-800 text-red-400 border-red-500/30 hover:bg-red-500/10; }
+  .field {
+    @apply w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100
+           placeholder-gray-400 transition-shadow hover:border-gray-600
+           focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:outline-none;
+  }
+  .label { @apply block text-xs font-medium text-gray-400 mb-1.5; }
+  .label-req::after { content: ' *'; @apply text-red-400; }
+  .hint { @apply text-xs text-gray-400 mt-1; }
+  .section-title { @apply text-xs font-medium text-gray-400 tracking-wide uppercase mb-3; }
+  .menu-item {
+    @apply w-full flex items-center justify-between px-3 py-2 text-sm text-gray-300 hover:bg-gray-800;
+  }
+  .menu-hint { @apply text-xs text-gray-400 font-mono; }
+  .star { @apply p-1 rounded-md text-gray-400 transition-colors hover:text-amber-400 hover:bg-amber-500/10; }
+  .row-check { @apply w-4 h-4 rounded border-gray-600 accent-blue-500 cursor-pointer align-middle; }
+  .card-item.is-picked { @apply border-blue-500/50 ring-1 ring-blue-500/30 bg-blue-500/5; }
+  .star.is-on { @apply text-amber-400; }
+}

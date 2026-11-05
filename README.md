@@ -51,10 +51,14 @@ cdp-server stop
 | `cdp-autorunner-skill/` | 核心 skill | CLI 命令参考 + 通用站点脚本（google / taobao / deepseek / douyin / ebay） |
 | `skills/ebay-research-skill/` | 应用 skill | eBay 选品调研：列表 → 详情 → 成交记录 → HTML/xlsx/JSON 三份交付 |
 | `skills/douyin-viral-blueprint/` | 应用 skill | 抖音爆款拆解：切镜抽帧 + 口播转写 + 评论聚类 → 单文件 HTML 报告 |
+| `skills/douyin-topic-ideation/` | 应用 skill | 抖音爆款选题：读拆解报告 + 账号定位 → 10 条选题入库 + 可视化管理面板 |
+| `skills/douyin-viral-collect/` | 应用 skill | 抖音爆款采集：按关键词 / 对标博主 / 推荐流批量浏览，详情接口拉数据预筛，只下载对口视频归档 |
 
 核心 skill 提供通用的浏览器操作底座；应用 skill 是各自闭环的业务流程，目录内自带 `SKILL.md`、`references/`、`scripts/`，按各 `SKILL.md` 的 SOP 执行。
 
-需要操作浏览器的 skill 各自持有 `scripts/cdp-server(.exe)`，通过同一个 daemon（`127.0.0.1:18765`）和同一个扩展工作，二进制版本需保持一致；只做本地分析的 skill（如 `douyin-viral-blueprint`）不依赖该二进制。
+需要操作浏览器的 skill 各自持有 `scripts/cdp-server(.exe)`，通过同一个 daemon（`127.0.0.1:18765`）和同一个扩展工作，二进制版本需保持一致；只做本地分析 / 生成的 skill（`douyin-viral-blueprint`、`douyin-topic-ideation`）不依赖该二进制。
+
+三个抖音相关的 skill 共用 `~/.douyin-viral-blueprint/` 存配置与数据：`config.json`（key）、`account.json`（账号定位）、`topics.json`（选题库）。
 
 ## 示例
 
@@ -84,6 +88,11 @@ node skills/ebay-research-skill/scripts/ebay/ebay-research.js "headlight" --limi
 
 # 抖音爆款拆解 — 对下载好的素材做切镜/转写/评论聚类并出报告
 node skills/douyin-viral-blueprint/scripts/prepare.mjs <视频目录>
+
+# 抖音爆款选题 — 读拆解报告 + 账号定位，生成 10 条选题并起管理面板
+node skills/douyin-topic-ideation/scripts/account.mjs
+node skills/douyin-topic-ideation/scripts/topics.mjs save topics.new.json
+node skills/douyin-topic-ideation/scripts/open.mjs
 ```
 
 ## 项目结构
@@ -101,9 +110,11 @@ cdp-server/
 ├── scripts/              ← 二进制放置目录（从 GitHub Release 下载）
 ├── docs/                 ← 发布流程文档
 ├── cdp-autorunner-skill/ ← 核心 skill：CLI 参考 + 通用站点脚本
-└── skills/               ← 应用 skill（各自独立的能力包）
+└── skills/                     ← 应用 skill（各自独立的能力包）
     ├── ebay-research-skill/      ┃ eBay 选品调研
-    └── douyin-viral-blueprint/   ┃ 抖音爆款拆解
+    ├── douyin-viral-blueprint/   ┃ 抖音爆款拆解
+    ├── douyin-topic-ideation/    ┃ 抖音爆款选题：生成 + 选题库管理
+    └── douyin-viral-collect/     ┃ 抖音爆款采集：批量浏览 + 预筛下载
 ```
 
 发布流程见 `docs/RELEASE.md`。
