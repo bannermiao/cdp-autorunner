@@ -6,14 +6,14 @@
 
 | 位置 | 文件 | 示例 |
 | --- | --- | --- |
-| CLI 版本号 | **不再手改**：构建时由 git tag 注入（`-X cdp-server/cmd.version`），源码里是 `var version = "dev"` | `cdp-server v1.4.2` |
+| CLI 版本号 | **不再手改**：构建时由 git tag 注入（`-X cdp-server/cmd.version`），源码里是 `var version = "dev"` | `cdp-server v1.4.3` |
 | 扩展版本号 | `cdp-extension/manifest.json`（`version` 字段） | `"version": "2.2.0"` |
 | 扩展页面显示版本号 | `cdp-extension/popup.html`（`brand-ver`） | `v2.2.0 · Developer Tool` |
-| skill 下载版本号（bash） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `VERSION="v1.4.2"` |
-| skill 下载版本号（PowerShell） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `$VERSION = "v1.4.2"` |
-| skill version 输出示例 | `cdp-autorunner-skill/references/cdp-server-cli.md` | `cdp-server v1.4.2` |
-| 应用 skill 下载版本号 | `skills/*/SKILL.md`（含 `I-0` 安装段的 skill，如 `ebay-research-skill`；bash 与 PowerShell 各一处） | `VERSION="v1.4.2"` |
-| 应用 skill version 输出示例 | `skills/ebay-research-skill/references/cdp-cli.md` | `cdp-server v1.4.2` |
+| skill 下载版本号（bash） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `VERSION="v1.4.3"` |
+| skill 下载版本号（PowerShell） | `cdp-autorunner-skill/SKILL.md`（`I-0` 安装段） | `$VERSION = "v1.4.3"` |
+| skill version 输出示例 | `cdp-autorunner-skill/references/cdp-server-cli.md` | `cdp-server v1.4.3` |
+| 应用 skill 下载版本号 | `skills/*/SKILL.md`（含 `I-0` 安装段的 skill，如 `ebay-research-skill`；bash 与 PowerShell 各一处） | `VERSION="v1.4.3"` |
+| 应用 skill version 输出示例 | `skills/ebay-research-skill/references/cdp-cli.md` | `cdp-server v1.4.3` |
 
 > 注：CLI 与扩展版本号独立，不必一致（如 CLI v1.2.0 / 扩展 2.2.0）。
 

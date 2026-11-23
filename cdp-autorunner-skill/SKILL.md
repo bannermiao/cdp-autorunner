@@ -80,7 +80,7 @@ else
 fi
 
 # 下载
-VERSION="v1.4.2"
+VERSION="v1.4.3"
 curl -L -o "$BIN.gz" "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/$FILE"
 
 # 解压（.exe 不需要解压）
@@ -96,7 +96,7 @@ PowerShell（Windows）下：
 
 ```powershell
 cd {skill_path}/scripts
-$VERSION = "v1.4.2"
+$VERSION = "v1.4.3"
 Invoke-WebRequest -Uri "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/cdp-server-win-x64.exe" -OutFile "cdp-server.exe"
 Write-Host "下载完成"
 ```
@@ -136,7 +136,7 @@ Write-Host "下载完成"
 **方式 B（国内打不开商店 —— 用 release 里的离线包）**
 
 ```bash
-VERSION="v1.4.2"
+VERSION="v1.4.3"
 curl -L -o cdp-extension.zip "https://github.com/bannermiao/cdp-autorunner/releases/download/$VERSION/cdp-extension.zip"
 unzip -o cdp-extension.zip -d <扩展存放目录>
 ```

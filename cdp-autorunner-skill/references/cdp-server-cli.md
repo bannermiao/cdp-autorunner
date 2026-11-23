@@ -89,7 +89,7 @@ cdp-server version
 
 ✅ 输出示例：
 ```
-cdp-server v1.4.2
+cdp-server v1.4.3
 ```
 
 ---
